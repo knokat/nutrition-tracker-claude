@@ -37,26 +37,27 @@ export function onAuthChange(cb) {
 
 // ── Weeks ──
 
-export async function getOrCreateWeek(userId, mondayDate) {
+export async function getOrCreateWeek(userId, startDate) {
   // Try to find existing week
   let { data, error } = await supabase
     .from('weeks')
     .select('*')
     .eq('user_id', userId)
-    .eq('start_date', mondayDate)
-    .single();
+    .eq('start_date', startDate)
+    .maybeSingle();
 
-  if (error && error.code === 'PGRST116') {
+  if (error) throw error;
+
+  if (!data) {
     // Not found — create
     const { data: created, error: cErr } = await supabase
       .from('weeks')
-      .insert({ user_id: userId, start_date: mondayDate })
+      .insert({ user_id: userId, start_date: startDate })
       .select()
       .single();
     if (cErr) throw cErr;
     return created;
   }
-  if (error) throw error;
   return data;
 }
 
@@ -78,9 +79,11 @@ export async function getOrCreateDay(weekId, date, dayType) {
     .select('*')
     .eq('week_id', weekId)
     .eq('date', date)
-    .single();
+    .maybeSingle();
 
-  if (error && error.code === 'PGRST116') {
+  if (error) throw error;
+
+  if (!data) {
     const { data: created, error: cErr } = await supabase
       .from('days')
       .insert({
@@ -95,7 +98,6 @@ export async function getOrCreateDay(weekId, date, dayType) {
     if (cErr) throw cErr;
     return created;
   }
-  if (error) throw error;
   return data;
 }
 
