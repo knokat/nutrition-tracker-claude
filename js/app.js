@@ -48,18 +48,23 @@ function TodayScreen({ user, targets, onSettings }) {
     }
   }, [selectedDate, daysData]);
 
-  async function loadWeek(mon) {
+  async function loadWeek(start) {
     setLoading(true);
     try {
-      const week = await getOrCreateWeek(user.id, mon);
+      const week = await getOrCreateWeek(user.id, start);
+      console.log('loadWeek: week=', week);
       const days = await getDaysForWeek(week.id);
+      console.log('loadWeek: days from DB=', days.map(d => ({ date: d.date, kcal: d.total_kcal, id: d.id })));
 
       // Ensure all 7 days exist
-      const dates = getWeekDates(mon);
+      const dates = getWeekDates(start);
+      console.log('loadWeek: expected dates=', dates);
       const allDays = [];
       for (const d of dates) {
-        let existing = days.find(dy => dy.date === d);
+        // Compare only first 10 chars (YYYY-MM-DD) in case DB returns datetime
+        let existing = days.find(dy => String(dy.date).slice(0, 10) === d);
         if (!existing) {
+          console.log('loadWeek: creating missing day for', d);
           existing = await getOrCreateDay(week.id, d, defaultDayType(d));
         }
         allDays.push(existing);
@@ -72,11 +77,12 @@ function TodayScreen({ user, targets, onSettings }) {
   }
 
   async function loadDay(dateStr) {
-    const day = daysData.find(d => d.date === dateStr);
+    const day = daysData.find(d => String(d.date).slice(0, 10) === dateStr);
     if (!day) return;
     setDayData(day);
     try {
       const m = await getMealsForDay(day.id);
+      console.log('loadDay:', dateStr, 'meals=', m.length, m.map(x => x.recipe_name));
       setMeals(m);
     } catch (e) {
       console.error('loadDay error:', e);
