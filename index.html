@@ -545,6 +545,107 @@
     .legend-item { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--text-3); }
     .target-line-legend { width: 1.5px; height: 12px; background: var(--text-3); border-radius: 1px; }
 
+    /* ── Mealplan Screen ── */
+    .mealplan-screen { padding: 0 16px 24px; }
+
+    .mp-overview-card {
+      background: var(--card); border-radius: 14px; border: 0.5px solid var(--border-1);
+      padding: 14px; margin-bottom: 16px;
+    }
+    .mp-overview-title { font-size: 13px; font-weight: 600; margin-bottom: 10px; }
+    .mp-period { display: flex; gap: 12px; margin-bottom: 8px; }
+    .mp-period:last-child { margin-bottom: 0; }
+    .mp-period-label { font-size: 12px; font-weight: 600; color: var(--text-2); width: 52px; flex-shrink: 0; padding-top: 1px; }
+    .mp-period-meals { flex: 1; }
+    .mp-period-meal { font-size: 13px; color: var(--text-1); margin-bottom: 2px; }
+
+    .mp-section-title { font-size: 12px; font-weight: 600; color: var(--text-2); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; padding-left: 4px; }
+    .mp-recipes { display: flex; flex-direction: column; gap: 8px; }
+
+    .mp-recipe-card {
+      background: var(--card); border-radius: 14px; border: 0.5px solid var(--border-1); overflow: hidden;
+    }
+    .mp-recipe-header {
+      display: flex; align-items: center; padding: 12px 14px; gap: 10px; cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .mp-recipe-header:active { background: var(--border-3); }
+    .mp-recipe-info { flex: 1; min-width: 0; }
+    .mp-recipe-name { font-size: 14px; font-weight: 600; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+    .mp-recipe-meta { font-size: 12px; color: var(--text-2); margin-top: 2px; }
+    .mp-recipe-macros { font-size: 12px; color: var(--text-3); margin-top: 1px; font-variant-numeric: tabular-nums; }
+
+    .mp-badge {
+      font-size: 9px; font-weight: 600; padding: 2px 6px; border-radius: 4px; text-transform: uppercase; letter-spacing: 0.3px;
+    }
+    .mp-badge.prep { background: #E6F1FB; color: #0C447C; }
+    .mp-badge.fresh { background: #E1F5EE; color: #085041; }
+
+    .mp-recipe-body {
+      background: #fafaf8; border-top: 0.5px solid var(--border-2); padding: 10px 14px 14px;
+    }
+    .mp-ingredients-title { font-size: 11px; font-weight: 600; color: var(--text-2); text-transform: uppercase; letter-spacing: 0.4px; margin-bottom: 8px; }
+    .mp-ingredient-row { display: flex; align-items: baseline; gap: 8px; font-size: 13px; margin-bottom: 4px; }
+    .mp-ingredient-name { flex: 1; color: var(--text-1); }
+    .mp-ingredient-amount { color: var(--text-2); font-variant-numeric: tabular-nums; flex-shrink: 0; }
+    .mp-ingredient-kcal { color: var(--text-3); font-size: 11px; font-variant-numeric: tabular-nums; flex-shrink: 0; min-width: 48px; text-align: right; }
+
+    .mp-standards {
+      background: var(--card); border-radius: 14px; border: 0.5px solid var(--border-1); overflow: hidden;
+    }
+    .mp-standard-row {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 10px 14px; font-size: 13px;
+    }
+    .mp-standard-row + .mp-standard-row { border-top: 0.5px solid var(--border-2); }
+    .mp-standard-name { color: var(--text-2); }
+    .mp-standard-kcal { color: var(--text-3); font-variant-numeric: tabular-nums; font-size: 12px; }
+
+    /* ── Family Screen ── */
+    .family-screen { padding: 0 16px 24px; }
+    .family-header { padding: calc(var(--safe-top) + 12px) 0 12px; }
+
+    .family-strip { display: flex; justify-content: space-between; margin-top: 10px; }
+    .family-day {
+      display: flex; flex-direction: column; align-items: center; gap: 4px; cursor: pointer;
+      padding: 2px; border-radius: 10px;
+    }
+    .family-day.selected { background: rgba(32, 87, 129, 0.06); }
+    .family-day:active { background: var(--border-3); }
+    .family-day-label { font-size: 10px; font-weight: 500; color: var(--text-3); letter-spacing: 0.3px; }
+    .family-day-circle {
+      width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+      font-size: 14px; font-weight: 500; color: var(--text-2); background: var(--border-3);
+    }
+    .family-day-circle.active { background: var(--kcal); color: #fff; font-weight: 600; }
+
+    .family-daytype { margin-bottom: 12px; }
+    .family-daytype-pill {
+      display: inline-block; font-size: 12px; font-weight: 600; padding: 4px 12px; border-radius: 8px;
+    }
+
+    .family-meals { display: flex; flex-direction: column; gap: 8px; }
+    .family-meal-card {
+      background: var(--card); border-radius: 14px; border: 0.5px solid var(--border-1); overflow: hidden;
+    }
+    .family-meal-header {
+      display: flex; align-items: center; gap: 8px; padding: 10px 14px;
+      border-bottom: 0.5px solid var(--border-2);
+    }
+    .family-meal-icon { font-size: 16px; }
+    .family-meal-label { font-size: 13px; font-weight: 600; }
+
+    .family-member-rows { padding: 6px 14px 8px; }
+    .family-member-row {
+      display: flex; align-items: center; gap: 8px; padding: 5px 0;
+    }
+    .family-member-row.dimmed { opacity: 0.4; }
+    .family-avatar {
+      width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+      font-size: 11px; font-weight: 700; flex-shrink: 0;
+    }
+    .family-member-meal { font-size: 13px; color: var(--text-1); }
+
     /* ── Login Screen ── */
     .login-screen {
       display: flex;
