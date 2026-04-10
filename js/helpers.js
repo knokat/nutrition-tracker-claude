@@ -22,10 +22,12 @@ export function parseDate(s) {
   return new Date(y, m - 1, d);
 }
 
-export function getMonday(d) {
+export function getWeekStart(d) {
+  // Mealplan-Woche: Samstag bis Freitag
   const dt = d instanceof Date ? new Date(d) : parseDate(d);
-  const day = dt.getDay();
-  const diff = day === 0 ? -6 : 1 - day;
+  const day = dt.getDay(); // 0=So, 1=Mo, ... 6=Sa
+  // Samstag = 6 → diff 0, Sonntag = 0 → diff -1, Mo = 1 → diff -2, ... Fr = 5 → diff -6
+  const diff = day === 6 ? 0 : -(day + 1);
   dt.setDate(dt.getDate() + diff);
   return fmtDate(dt);
 }
@@ -36,8 +38,9 @@ export function addDays(dateStr, n) {
   return fmtDate(d);
 }
 
-export function getWeekDates(mondayStr) {
-  return Array.from({ length: 7 }, (_, i) => addDays(mondayStr, i));
+export function getWeekDates(saturdayStr) {
+  // Sa, So, Mo, Di, Mi, Do, Fr
+  return Array.from({ length: 7 }, (_, i) => addDays(saturdayStr, i));
 }
 
 export function weekdayShort(dateStr) {

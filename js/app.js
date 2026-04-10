@@ -1,7 +1,7 @@
 // js/app.js — Main App Component
 import { html, render, useState, useEffect, useRef } from 'https://unpkg.com/htm/preact/standalone.module.js';
 import {
-  today, getMonday, getWeekDates, addDays, formatDateDisplay, formatDateFull,
+  today, getWeekStart, getWeekDates, addDays, formatDateDisplay, formatDateFull,
   isToday, isFuture, getKW, weekdayShort, defaultDayType,
   getSlotsForType, sumMacros, macroPercent, n0,
   MACRO_COLORS, DAYTYPE_COLORS, DAYTYPE_LABELS,
@@ -28,8 +28,8 @@ const DAYTYPE_OPTIONS = [
 
 function TodayScreen({ user, targets }) {
   const [selectedDate, setSelectedDate] = useState(today());
-  const [monday, setMonday] = useState(getMonday(today()));
-  const [weekDates, setWeekDates] = useState(getWeekDates(getMonday(today())));
+  const [weekStart, setWeekStart] = useState(getWeekStart(today()));
+  const [weekDates, setWeekDates] = useState(getWeekDates(getWeekStart(today())));
   const [daysData, setDaysData] = useState([]);
   const [dayData, setDayData] = useState(null);
   const [meals, setMeals] = useState([]);
@@ -38,8 +38,8 @@ function TodayScreen({ user, targets }) {
 
   // Load week data
   useEffect(() => {
-    loadWeek(monday);
-  }, [monday, user]);
+    loadWeek(weekStart);
+  }, [weekStart, user]);
 
   // Load day data when selected date changes
   useEffect(() => {
@@ -86,18 +86,18 @@ function TodayScreen({ user, targets }) {
 
   function selectDate(dateStr) {
     setSelectedDate(dateStr);
-    const newMon = getMonday(dateStr);
-    if (newMon !== monday) {
-      setMonday(newMon);
-      setWeekDates(getWeekDates(newMon));
+    const newStart = getWeekStart(dateStr);
+    if (newStart !== weekStart) {
+      setWeekStart(newStart);
+      setWeekDates(getWeekDates(newStart));
     }
   }
 
   function shiftWeek(dir) {
-    const newMon = addDays(monday, dir * 7);
-    setMonday(newMon);
-    setWeekDates(getWeekDates(newMon));
-    setSelectedDate(dir > 0 ? newMon : addDays(newMon, 6));
+    const newStart = addDays(weekStart, dir * 7);
+    setWeekStart(newStart);
+    setWeekDates(getWeekDates(newStart));
+    setSelectedDate(dir > 0 ? newStart : addDays(newStart, 6));
   }
 
   async function changeDayType(newType) {
