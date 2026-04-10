@@ -11,9 +11,12 @@ export function today() {
 }
 
 export function fmtDate(d) {
-  // Returns YYYY-MM-DD
+  // Returns YYYY-MM-DD in local timezone
   const dt = d instanceof Date ? d : new Date(d);
-  return dt.toISOString().slice(0, 10);
+  const y = dt.getFullYear();
+  const m = String(dt.getMonth() + 1).padStart(2, '0');
+  const day = String(dt.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
 }
 
 export function parseDate(s) {
