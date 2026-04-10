@@ -1,0 +1,25 @@
+{
+  "name": "Nutrition Tracker",
+  "short_name": "Nutrition",
+  "description": "Katjas Nutrition & Makro Tracker",
+  "start_url": "/nutrition-tracker-claude/",
+  "scope": "/nutrition-tracker-claude/",
+  "display": "standalone",
+  "background_color": "#f4f4f2",
+  "theme_color": "#205781",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
