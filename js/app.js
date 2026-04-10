@@ -251,15 +251,165 @@ function TodayScreen({ user, targets, onSettings }) {
   `;
 }
 
-// ── Week Screen (placeholder) ──
+// ── Week Screen ──
 
 function WeekScreen({ user, targets }) {
+  const [weekStart, setWeekStart] = useState(getWeekStart(today()));
+  const [weekDates, setWeekDates] = useState(getWeekDates(getWeekStart(today())));
+  const [daysData, setDaysData] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => { loadWeekData(weekStart); }, [weekStart, user]);
+
+  async function loadWeekData(start) {
+    setLoading(true);
+    try {
+      const week = await getOrCreateWeek(user.id, start);
+      const days = await getDaysForWeek(week.id);
+      const dates = getWeekDates(start);
+      const allDays = [];
+      for (const d of dates) {
+        let existing = days.find(dy => String(dy.date).slice(0, 10) === d);
+        if (!existing) {
+          existing = await getOrCreateDay(week.id, d, defaultDayType(d));
+        }
+        allDays.push(existing);
+      }
+      setDaysData(allDays);
+    } catch (e) { console.error('WeekScreen loadWeek error:', e); }
+    setLoading(false);
+  }
+
+  function shiftWeek(dir) {
+    const s = addDays(weekStart, dir * 7);
+    setWeekStart(s);
+    setWeekDates(getWeekDates(s));
+  }
+
+  // Calculate totals
+  const targetsMap = targets ? Object.fromEntries(targets.map(t => [t.day_type, t])) : {};
+  const daysWithTargets = daysData.map(d => {
+    const t = targetsMap[d.day_type] || { target_kcal: 2200, target_protein: 140, target_carbs: 253, target_fat: 70 };
+    return { ...d, targets: t };
+  });
+
+  const filledDays = daysWithTargets.filter(d => d.total_kcal > 0);
+  const numFilled = filledDays.length || 1;
+
+  const totalActual = { kcal: 0, protein: 0, carbs: 0, fat: 0 };
+  const totalTarget = { kcal: 0, protein: 0, carbs: 0, fat: 0 };
+  daysWithTargets.forEach(d => {
+    totalActual.kcal += d.total_kcal || 0;
+    totalActual.protein += d.total_protein || 0;
+    totalActual.carbs += d.total_carbs || 0;
+    totalActual.fat += d.total_fat || 0;
+    totalTarget.kcal += d.targets.target_kcal;
+    totalTarget.protein += d.targets.target_protein;
+    totalTarget.carbs += d.targets.target_carbs;
+    totalTarget.fat += d.targets.target_fat;
+  });
+
+  const avgActual = {
+    kcal: Math.round(totalActual.kcal / numFilled),
+    protein: Math.round(totalActual.protein / numFilled),
+    carbs: Math.round(totalActual.carbs / numFilled),
+    fat: Math.round(totalActual.fat / numFilled),
+  };
+  const avgTarget = {
+    kcal: Math.round(totalTarget.kcal / 7),
+    protein: Math.round(totalTarget.protein / 7),
+    carbs: Math.round(totalTarget.carbs / 7),
+    fat: Math.round(totalTarget.fat / 7),
+  };
+
+  const maxKcal = Math.max(
+    ...daysWithTargets.map(d => Math.max(d.total_kcal || 0, d.targets.target_kcal)),
+    1
+  );
+
+  const dateRange = `${formatDateDisplay(weekDates[0])} – ${formatDateDisplay(weekDates[6])}`;
+
   return html`
     <div class="screen">
-      <div class="placeholder-screen">
-        <div class="placeholder-icon">📊</div>
-        <h2>Wochen-Dashboard</h2>
-        <p>Kommt bald — Wochenübersicht mit Kalorien- und Makro-Auswertung.</p>
+      <div class="week-screen">
+        <!-- Header -->
+        <div class="week-header">
+          <div class="week-header-top">
+            <h1 class="header-title">Woche</h1>
+            <span class="header-date">KW ${getKW(weekDates[3])}</span>
+          </div>
+          <div class="week-nav">
+            <div class="nav-arrow" onclick=${() => shiftWeek(-1)}>${Icons.chevLeft}</div>
+            <span class="week-range">${dateRange}</span>
+            <div class="nav-arrow" onclick=${() => shiftWeek(1)}>${Icons.chevRight}</div>
+          </div>
+        </div>
+
+        ${loading ? html`<div class="loading-state">Laden...</div>` : html`
+          <!-- Summary Cards -->
+          <div class="week-summary">
+            ${[
+              { key: 'kcal', label: 'KCAL', color: MACRO_COLORS.kcal, actual: totalActual.kcal, target: totalTarget.kcal, avg: avgActual.kcal, avgT: avgTarget.kcal },
+              { key: 'protein', label: 'PROT', color: MACRO_COLORS.protein, actual: totalActual.protein, target: totalTarget.protein, avg: avgActual.protein, avgT: avgTarget.protein },
+              { key: 'carbs', label: 'CARB', color: MACRO_COLORS.carbs, actual: totalActual.carbs, target: totalTarget.carbs, avg: avgActual.carbs, avgT: avgTarget.carbs },
+              { key: 'fat', label: 'FETT', color: MACRO_COLORS.fat, actual: totalActual.fat, target: totalTarget.fat, avg: avgActual.fat, avgT: avgTarget.fat },
+            ].map(m => {
+              const pct = Math.min(Math.round((m.actual / (m.target || 1)) * 100), 100);
+              return html`
+                <div class="summary-card">
+                  <div class="summary-label" style="color:${m.color}">${m.label}</div>
+                  <div class="summary-values">
+                    <span class="summary-actual">${n0(m.actual)}</span>
+                    <span class="summary-target">/ ${n0(m.target)}</span>
+                  </div>
+                  <div class="summary-bar-track">
+                    <div class="summary-bar-fill" style="width:${pct}%;background:${m.color}"/>
+                  </div>
+                  <div class="summary-avg">⌀ ${n0(m.avg)} / Tag (Ziel: ${n0(m.avgT)})</div>
+                </div>
+              `;
+            })}
+          </div>
+
+          <!-- Daily Bars -->
+          <div class="week-daily">
+            <div class="week-daily-title">Kalorien pro Tag</div>
+            ${daysWithTargets.map(d => {
+              const date = String(d.date).slice(0, 10);
+              const kcal = d.total_kcal || 0;
+              const target = d.targets.target_kcal;
+              const barW = Math.round((kcal / maxKcal) * 100);
+              const targetW = Math.round((target / maxKcal) * 100);
+              const dtColor = DAYTYPE_COLORS[d.day_type] || '#999';
+              const isTodayDate = isToday(date);
+              const barColor = kcal > target * 1.1 ? '#A42059' : kcal > target ? '#623c6d' : MACRO_COLORS.kcal;
+
+              return html`
+                <div class="daily-row ${isTodayDate ? 'today-row' : ''}">
+                  <div class="daily-label">
+                    <div class="dt-dot" style="background:${dtColor}"/>
+                    <span class="daily-day">${weekdayShort(date)}</span>
+                  </div>
+                  <div class="daily-bar-container">
+                    <div class="daily-bar-track">
+                      <div class="daily-bar-fill" style="width:${barW}%;background:${barColor}"/>
+                      <div class="daily-target-line" style="left:${targetW}%"/>
+                    </div>
+                    <span class="daily-kcal">${kcal > 0 ? n0(kcal) : '–'}</span>
+                  </div>
+                </div>
+              `;
+            })}
+
+            <!-- Legend -->
+            <div class="week-legend">
+              <span class="legend-item"><span class="dt-dot" style="background:${DAYTYPE_COLORS.workout}"/>Workout</span>
+              <span class="legend-item"><span class="dt-dot" style="background:${DAYTYPE_COLORS.rest}"/>Rest Day</span>
+              <span class="legend-item"><span class="dt-dot" style="background:${DAYTYPE_COLORS.friday}"/>Friday</span>
+              <span class="legend-item"><span class="target-line-legend"/>Ziel</span>
+            </div>
+          </div>
+        `}
       </div>
     </div>
   `;
