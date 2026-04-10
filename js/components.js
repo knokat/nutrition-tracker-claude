@@ -271,7 +271,7 @@ export function LoginScreen({ onLogin }) {
   return html`
     <div class="login-screen">
       <div class="login-card">
-        <div class="login-icon">🥗</div>
+        <img class="login-icon-img" src="icons/apple-touch-icon.png" alt="Nutrition Tracker"/>
         <h1 class="login-title">Nutrition Tracker</h1>
         <p class="login-subtitle">Makros & Kalorien im Blick</p>
         <div class="login-fields">
