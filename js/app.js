@@ -415,29 +415,320 @@ function WeekScreen({ user, targets }) {
   `;
 }
 
-// ── Mealplan Screen (placeholder) ──
+// ── Mealplan Screen ──
 
 function MealplanScreen({ user }) {
+  const [weekStart, setWeekStart] = useState(getWeekStart(today()));
+  const [weekDates, setWeekDates] = useState(getWeekDates(getWeekStart(today())));
+  const [daysData, setDaysData] = useState([]);
+  const [allMeals, setAllMeals] = useState({}); // { date: [meals] }
+  const [loading, setLoading] = useState(true);
+  const [openRecipe, setOpenRecipe] = useState(null); // recipe_name
+
+  useEffect(() => { loadMealplan(weekStart); }, [weekStart, user]);
+
+  async function loadMealplan(start) {
+    setLoading(true);
+    try {
+      const week = await getOrCreateWeek(user.id, start);
+      const days = await getDaysForWeek(week.id);
+      const dates = getWeekDates(start);
+      const allDays = [];
+      const mealsMap = {};
+      for (const d of dates) {
+        let existing = days.find(dy => String(dy.date).slice(0, 10) === d);
+        if (!existing) {
+          existing = await getOrCreateDay(week.id, d, defaultDayType(d));
+        }
+        allDays.push(existing);
+        const m = await getMealsForDay(existing.id);
+        mealsMap[d] = m;
+      }
+      setDaysData(allDays);
+      setAllMeals(mealsMap);
+    } catch (e) { console.error('MealplanScreen error:', e); }
+    setLoading(false);
+  }
+
+  function shiftWeek(dir) {
+    const s = addDays(weekStart, dir * 7);
+    setWeekStart(s);
+    setWeekDates(getWeekDates(s));
+  }
+
+  // Group meals by unique recipe (variable only)
+  const recipes = [];
+  const seen = new Set();
+  const weekdayMeals = {}; // { recipeName: [dates] }
+
+  Object.entries(allMeals).forEach(([date, meals]) => {
+    meals.forEach(m => {
+      if (!m.recipe_name) return;
+      if (!weekdayMeals[m.recipe_name]) weekdayMeals[m.recipe_name] = [];
+      weekdayMeals[m.recipe_name].push({ date, ...m });
+      if (!seen.has(m.recipe_name)) {
+        seen.add(m.recipe_name);
+        recipes.push(m);
+      }
+    });
+  });
+
+  // Separate variable and standard
+  const variableRecipes = recipes.filter(r => !r.is_standard);
+  const standardRecipes = recipes.filter(r => r.is_standard);
+
+  // Build overview: what's for Mo-Do, Fr, Sa+So
+  const mealsByPeriod = { moDo: {}, fr: {}, saSo: {} };
+  weekDates.forEach((d, i) => {
+    const meals = allMeals[d] || [];
+    const dayMeals = meals.filter(m => ['breakfast', 'lunch'].includes(m.slot) && !m.is_standard);
+    // Sa=0, So=1, Mo=2, Di=3, Mi=4, Do=5, Fr=6
+    if (i >= 2 && i <= 5) { // Mo-Do
+      dayMeals.forEach(m => { mealsByPeriod.moDo[m.slot] = m.recipe_name; });
+    } else if (i === 6) { // Fr
+      dayMeals.forEach(m => { mealsByPeriod.fr[m.slot] = m.recipe_name; });
+    } else { // Sa, So
+      dayMeals.forEach(m => { mealsByPeriod.saSo[m.slot] = m.recipe_name; });
+    }
+  });
+
+  const dateRange = `${formatDateDisplay(weekDates[0])} – ${formatDateDisplay(weekDates[6])}`;
+
   return html`
     <div class="screen">
-      <div class="placeholder-screen">
-        <div class="placeholder-icon">📖</div>
-        <h2>Mealplan</h2>
-        <p>Kommt bald — Rezepte, Zutaten und Meal-Prep-Übersicht.</p>
+      <div class="mealplan-screen">
+        <!-- Header -->
+        <div class="week-header">
+          <div class="week-header-top">
+            <h1 class="header-title">Mealplan</h1>
+            <span class="header-date">KW ${getKW(weekDates[3])}</span>
+          </div>
+          <div class="week-nav">
+            <div class="nav-arrow" onclick=${() => shiftWeek(-1)}>${Icons.chevLeft}</div>
+            <span class="week-range">${dateRange}</span>
+            <div class="nav-arrow" onclick=${() => shiftWeek(1)}>${Icons.chevRight}</div>
+          </div>
+        </div>
+
+        ${loading ? html`<div class="loading-state">Laden...</div>` : html`
+          <!-- Overview Card -->
+          <div class="mp-overview-card">
+            <div class="mp-overview-title">Wochenübersicht</div>
+            ${mealsByPeriod.moDo.breakfast || mealsByPeriod.moDo.lunch ? html`
+              <div class="mp-period">
+                <span class="mp-period-label">Mo–Do</span>
+                <div class="mp-period-meals">
+                  ${mealsByPeriod.moDo.breakfast ? html`<div class="mp-period-meal">🥣 ${mealsByPeriod.moDo.breakfast}</div>` : ''}
+                  ${mealsByPeriod.moDo.lunch ? html`<div class="mp-period-meal">🍽️ ${mealsByPeriod.moDo.lunch}</div>` : ''}
+                </div>
+              </div>
+            ` : ''}
+            ${mealsByPeriod.fr.breakfast ? html`
+              <div class="mp-period">
+                <span class="mp-period-label">Freitag</span>
+                <div class="mp-period-meals">
+                  <div class="mp-period-meal">🥣 ${mealsByPeriod.fr.breakfast}</div>
+                  <div class="mp-period-meal">🍅 Caprese</div>
+                  <div class="mp-period-meal">🎬 Movie Night</div>
+                </div>
+              </div>
+            ` : ''}
+            ${mealsByPeriod.saSo.breakfast || mealsByPeriod.saSo.lunch ? html`
+              <div class="mp-period">
+                <span class="mp-period-label">Sa + So</span>
+                <div class="mp-period-meals">
+                  ${mealsByPeriod.saSo.breakfast ? html`<div class="mp-period-meal">🥣 ${mealsByPeriod.saSo.breakfast}</div>` : ''}
+                  ${mealsByPeriod.saSo.lunch ? html`<div class="mp-period-meal">🍽️ ${mealsByPeriod.saSo.lunch}</div>` : ''}
+                </div>
+              </div>
+            ` : ''}
+          </div>
+
+          <!-- Recipe Cards -->
+          <div class="mp-section-title">Rezepte (${variableRecipes.length})</div>
+          <div class="mp-recipes">
+            ${variableRecipes.map(r => {
+              const isOpen = openRecipe === r.recipe_name;
+              const items = r.meal_items || [];
+              const occurrences = weekdayMeals[r.recipe_name] || [];
+              const days = occurrences.map(o => weekdayShort(String(o.date).slice(0, 10))).join(', ');
+              const isMealPrep = occurrences.length >= 3;
+
+              return html`
+                <div class="mp-recipe-card">
+                  <div class="mp-recipe-header" onclick=${() => setOpenRecipe(isOpen ? null : r.recipe_name)}>
+                    <div class="mp-recipe-info">
+                      <div class="mp-recipe-name">
+                        ${r.recipe_name}
+                        ${isMealPrep
+                          ? html`<span class="mp-badge prep">Meal Prep</span>`
+                          : html`<span class="mp-badge fresh">Frisch</span>`
+                        }
+                      </div>
+                      <div class="mp-recipe-meta">
+                        ${r.slot === 'breakfast' ? '🥣 Frühstück' : '🍽️ Mittagessen'} · ${days}
+                      </div>
+                      <div class="mp-recipe-macros">
+                        ${n0(r.kcal)} kcal · P ${n0(r.protein)} · C ${n0(r.carbs)} · F ${n0(r.fat)}
+                      </div>
+                    </div>
+                    <div class="meal-chevron">${isOpen ? Icons.chevUp : Icons.chevDown}</div>
+                  </div>
+                  ${isOpen && items.length > 0 && html`
+                    <div class="mp-recipe-body">
+                      <div class="mp-ingredients-title">Zutaten pro Portion</div>
+                      ${items.map(it => html`
+                        <div class="mp-ingredient-row">
+                          <span class="mp-ingredient-name">${it.ingredient_name}</span>
+                          <span class="mp-ingredient-amount">${n0(it.amount_g)}${it.unit || 'g'}</span>
+                          <span class="mp-ingredient-kcal">${n0(it.kcal)} kcal</span>
+                        </div>
+                      `)}
+                    </div>
+                  `}
+                </div>
+              `;
+            })}
+          </div>
+
+          <!-- Standard Meals -->
+          ${standardRecipes.length > 0 && html`
+            <div class="mp-section-title" style="margin-top:16px">Standardbausteine (${standardRecipes.length})</div>
+            <div class="mp-standards">
+              ${standardRecipes.map(r => html`
+                <div class="mp-standard-row">
+                  <span class="mp-standard-name">${r.recipe_name}</span>
+                  <span class="mp-standard-kcal">${n0(r.kcal)} kcal</span>
+                </div>
+              `)}
+            </div>
+          `}
+        `}
       </div>
     </div>
   `;
 }
 
-// ── Family Screen (placeholder) ──
+// ── Family Screen ──
 
 function FamilyScreen({ user }) {
+  const [selectedDate, setSelectedDate] = useState(today());
+  const [weekStart, setWeekStart] = useState(getWeekStart(today()));
+  const [weekDates, setWeekDates] = useState(getWeekDates(getWeekStart(today())));
+  const [daysData, setDaysData] = useState([]);
+  const [meals, setMeals] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => { loadFamilyWeek(weekStart); }, [weekStart, user]);
+  useEffect(() => { if (daysData.length > 0) loadFamilyDay(selectedDate); }, [selectedDate, daysData]);
+
+  async function loadFamilyWeek(start) {
+    setLoading(true);
+    try {
+      const week = await getOrCreateWeek(user.id, start);
+      const days = await getDaysForWeek(week.id);
+      const dates = getWeekDates(start);
+      const allDays = [];
+      for (const d of dates) {
+        let existing = days.find(dy => String(dy.date).slice(0, 10) === d);
+        if (!existing) existing = await getOrCreateDay(week.id, d, defaultDayType(d));
+        allDays.push(existing);
+      }
+      setDaysData(allDays);
+    } catch (e) { console.error('FamilyScreen error:', e); }
+    setLoading(false);
+  }
+
+  async function loadFamilyDay(dateStr) {
+    const day = daysData.find(d => String(d.date).slice(0, 10) === dateStr);
+    if (!day) return;
+    try {
+      const m = await getMealsForDay(day.id);
+      setMeals(m);
+    } catch (e) { setMeals([]); }
+  }
+
+  function selectDate(dateStr) {
+    setSelectedDate(dateStr);
+    const newStart = getWeekStart(dateStr);
+    if (newStart !== weekStart) {
+      setWeekStart(newStart);
+      setWeekDates(getWeekDates(newStart));
+    }
+  }
+
+  const dayData = daysData.find(d => String(d.date).slice(0, 10) === selectedDate);
+  const dayType = dayData?.day_type || 'rest';
+  const allSlots = getSlotsForType(dayType);
+
+  // Family members
+  const members = [
+    { key: 'katja', initial: 'K', name: 'Katja', bg: '#E6F1FB', color: '#0C447C' },
+    { key: 'leander', initial: 'L', name: 'Leander', bg: '#E1F5EE', color: '#085041' },
+    { key: 'matthias', initial: 'M', name: 'Matthias', bg: '#f0f0ee', color: '#666' },
+  ];
+
   return html`
     <div class="screen">
-      <div class="placeholder-screen">
-        <div class="placeholder-icon">👨‍👩‍👦</div>
-        <h2>Familienübersicht</h2>
-        <p>Kommt bald — wer isst was an welchem Tag.</p>
+      <div class="family-screen">
+        <!-- Header with date picker -->
+        <div class="family-header">
+          <div class="week-header-top">
+            <h1 class="header-title">Familie</h1>
+            <span class="header-date">${formatDateDisplay(selectedDate)}</span>
+          </div>
+          <div class="family-strip">
+            ${weekDates.map(d => {
+              const active = isToday(d);
+              const selected = d === selectedDate;
+              const dayNum = new Date(d + 'T12:00').getDate();
+              return html`
+                <div class="family-day ${selected ? 'selected' : ''}" onclick=${() => selectDate(d)}>
+                  <span class="family-day-label ${active ? 'today-label' : ''}">${active ? 'HEUTE' : weekdayShort(d)}</span>
+                  <div class="family-day-circle ${active ? 'active' : ''}">${dayNum}</div>
+                </div>
+              `;
+            })}
+          </div>
+        </div>
+
+        <!-- Day type pill -->
+        <div class="family-daytype">
+          <span class="family-daytype-pill" style="background:${DAYTYPE_COLORS[dayType]}20;color:${DAYTYPE_COLORS[dayType]}">
+            ${DAYTYPE_LABELS[dayType]}
+          </span>
+        </div>
+
+        ${loading ? html`<div class="loading-state">Laden...</div>` : html`
+          <!-- Meal slots with family rows -->
+          <div class="family-meals">
+            ${allSlots.map(slot => {
+              const katjaMeal = meals.find(m => m.slot === slot.key && (!m.person || m.person === 'katja'));
+
+              return html`
+                <div class="family-meal-card">
+                  <div class="family-meal-header">
+                    <span class="family-meal-icon">${slot.icon}</span>
+                    <span class="family-meal-label">${slot.label}</span>
+                  </div>
+                  <div class="family-member-rows">
+                    ${members.map(mem => {
+                      const meal = mem.key === 'katja' ? katjaMeal : null; // TODO: multi-person meals
+                      const name = meal ? meal.recipe_name : '—';
+                      const dimmed = !meal;
+                      return html`
+                        <div class="family-member-row ${dimmed ? 'dimmed' : ''}">
+                          <div class="family-avatar" style="background:${mem.bg};color:${mem.color}">${mem.initial}</div>
+                          <span class="family-member-meal">${name}</span>
+                        </div>
+                      `;
+                    })}
+                  </div>
+                </div>
+              `;
+            })}
+          </div>
+        `}
       </div>
     </div>
   `;
