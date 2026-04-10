@@ -10,7 +10,7 @@ import {
   supabase, signIn, signOut, getUser, onAuthChange,
   getOrCreateWeek, getDaysForWeek, getOrCreateDay,
   getMealsForDay, updateDayType, updateDayTotals,
-  upsertMeal, getDayTypeTargets,
+  upsertMeal, getDayTypeTargets, importWeekData,
 } from './db.js';
 import {
   Icons, WeekStrip, MacroBars, SegmentedPicker,
@@ -289,6 +289,11 @@ function FamilyScreen({ user }) {
 // ── Settings Screen ──
 
 function SettingsScreen({ user, onLogout }) {
+  const [showImport, setShowImport] = useState(false);
+  const [importJson, setImportJson] = useState('');
+  const [importStatus, setImportStatus] = useState(''); // '', 'loading', 'success', 'error'
+  const [importMsg, setImportMsg] = useState('');
+
   const clearCacheAndReload = async () => {
     if ('serviceWorker' in navigator) {
       const regs = await navigator.serviceWorker.getRegistrations();
@@ -299,6 +304,23 @@ function SettingsScreen({ user, onLogout }) {
       for (const k of keys) await caches.delete(k);
     }
     window.location.reload(true);
+  };
+
+  const handleImport = async () => {
+    if (!importJson.trim()) return;
+    setImportStatus('loading');
+    setImportMsg('');
+    try {
+      const data = JSON.parse(importJson.trim());
+      if (!data.start_date || !data.days) throw new Error('Ungültiges Format: start_date und days fehlen');
+      await importWeekData(user.id, data);
+      setImportStatus('success');
+      setImportMsg(`KW importiert (Start: ${data.start_date}). ${data.days.length} Tage mit ${data.days.reduce((s,d) => s + (d.meals?.length||0), 0)} Mahlzeiten.`);
+      setImportJson('');
+    } catch (e) {
+      setImportStatus('error');
+      setImportMsg(e.message);
+    }
   };
 
   return html`
@@ -313,6 +335,35 @@ function SettingsScreen({ user, onLogout }) {
               <span>Email</span>
               <span class="settings-value">${user?.email}</span>
             </div>
+          </div>
+        </div>
+
+        <div class="settings-section">
+          <div class="settings-label">Daten</div>
+          <div class="settings-card">
+            <div class="settings-row clickable" onclick=${() => setShowImport(!showImport)}>
+              <span>Mealplan importieren</span>
+              <span class="settings-arrow">${showImport ? '↑' : '→'}</span>
+            </div>
+            ${showImport && html`
+              <div class="import-section">
+                <textarea
+                  class="import-textarea"
+                  placeholder='JSON vom Mealplan-Chat hier einfügen...'
+                  value=${importJson}
+                  onInput=${e => setImportJson(e.target.value)}
+                  rows="8"
+                />
+                <div class="import-actions">
+                  <div class="sheet-btn save" onclick=${handleImport}>
+                    ${importStatus === 'loading' ? 'Importiere...' : 'Importieren'}
+                  </div>
+                </div>
+                ${importMsg && html`
+                  <div class="import-msg ${importStatus}">${importMsg}</div>
+                `}
+              </div>
+            `}
           </div>
         </div>
 
@@ -378,7 +429,7 @@ function App() {
   }
 
   if (!authChecked) {
-    return html`<div class="splash"><div class="splash-icon">🥗</div></div>`;
+    return html`<div class="splash"><img class="splash-logo" src="icons/apple-touch-icon.png" alt=""/></div>`;
   }
 
   if (!user) {
