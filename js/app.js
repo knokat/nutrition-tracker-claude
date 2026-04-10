@@ -26,7 +26,7 @@ const DAYTYPE_OPTIONS = [
 
 // ── Today Screen ──
 
-function TodayScreen({ user, targets }) {
+function TodayScreen({ user, targets, onSettings }) {
   const [selectedDate, setSelectedDate] = useState(today());
   const [weekStart, setWeekStart] = useState(getWeekStart(today()));
   const [weekDates, setWeekDates] = useState(getWeekDates(getWeekStart(today())));
@@ -179,6 +179,7 @@ function TodayScreen({ user, targets }) {
               <span class="kw-label">KW ${getKW(selectedDate)}</span>
               <div class="nav-arrow" onclick=${() => shiftWeek(1)}>${Icons.chevRight}</div>
             </div>
+            <div class="nav-arrow settings-gear" onclick=${onSettings}>${Icons.settings}</div>
           </div>
         </div>
 
@@ -449,7 +450,7 @@ function App() {
   }
 
   const screens = {
-    today: html`<${TodayScreen} user=${user} targets=${targets}/>`,
+    today: html`<${TodayScreen} user=${user} targets=${targets} onSettings=${() => setShowSettings(true)}/>`,
     week: html`<${WeekScreen} user=${user} targets=${targets}/>`,
     mealplan: html`<${MealplanScreen} user=${user}/>`,
     family: html`<${FamilyScreen} user=${user}/>`,
