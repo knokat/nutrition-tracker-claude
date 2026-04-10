@@ -657,6 +657,13 @@ function FamilyScreen({ user }) {
     }
   }
 
+  function shiftWeek(dir) {
+    const s = addDays(weekStart, dir * 7);
+    setWeekStart(s);
+    setWeekDates(getWeekDates(s));
+    setSelectedDate(dir > 0 ? s : addDays(s, 6));
+  }
+
   const dayData = daysData.find(d => String(d.date).slice(0, 10) === selectedDate);
   const dayType = dayData?.day_type || 'rest';
   const allSlots = getSlotsForType(dayType);
@@ -675,7 +682,13 @@ function FamilyScreen({ user }) {
         <div class="family-header">
           <div class="week-header-top">
             <h1 class="header-title">Familie</h1>
-            <span class="header-date">${formatDateDisplay(selectedDate)}</span>
+            <div class="header-actions">
+              <div class="header-nav-arrows">
+                <div class="nav-arrow" onclick=${() => shiftWeek(-1)}>${Icons.chevLeft}</div>
+                <span class="kw-label">KW ${getKW(selectedDate)}</span>
+                <div class="nav-arrow" onclick=${() => shiftWeek(1)}>${Icons.chevRight}</div>
+              </div>
+            </div>
           </div>
           <div class="family-strip">
             ${weekDates.map(d => {
