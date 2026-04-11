@@ -270,7 +270,7 @@ export async function getRecipesForWeek(weekId) {
 // ── Import (Mealplan JSON) ──
 
 export async function importWeekData(userId, weekData) {
-  // weekData: { start_date, days: [{ date, day_type, meals: [{ slot, recipe_name, ... items }] }] }
+  // weekData: { start_date, days: [...], recipes: [...] }
   const week = await getOrCreateWeek(userId, weekData.start_date);
 
   for (const dayData of weekData.days) {
@@ -301,6 +301,25 @@ export async function importWeekData(userId, weekData) {
     }), { total_kcal: 0, total_protein: 0, total_carbs: 0, total_fat: 0 });
 
     await updateDayTotals(day.id, totals);
+  }
+
+  // Import recipes (servings, total_items, steps)
+  if (weekData.recipes && weekData.recipes.length > 0) {
+    // Clear existing recipes for this week
+    await supabase.from('recipes').delete().eq('week_id', week.id);
+
+    for (const r of weekData.recipes) {
+      await supabase.from('recipes').insert({
+        week_id: week.id,
+        name: r.name,
+        description: r.description || null,
+        is_meal_prep: r.is_meal_prep || false,
+        meal_type: r.meal_type || null,
+        servings: r.servings || [],
+        total_items: r.total_items || [],
+        steps: r.steps || [],
+      });
+    }
   }
 
   return week;
