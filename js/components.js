@@ -300,6 +300,196 @@ export function LoginScreen({ onLogin }) {
   `;
 }
 
+// ── FDDB Screenshot Import ──
+
+function FddbImport({ onImport }) {
+  const [status, setStatus] = useState('idle'); // idle, loading, done, error
+  const [errorMsg, setErrorMsg] = useState('');
+  const [preview, setPreview] = useState(null); // { items, base64 }
+  const fileRef = useRef(null);
+
+  async function handleFile(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Validate file type
+    if (!file.type.startsWith('image/')) {
+      setStatus('error');
+      setErrorMsg('Bitte ein Bild auswählen (PNG, JPG)');
+      return;
+    }
+
+    // Max 10MB
+    if (file.size > 10 * 1024 * 1024) {
+      setStatus('error');
+      setErrorMsg('Bild zu groß (max. 10 MB)');
+      return;
+    }
+
+    setStatus('loading');
+    setErrorMsg('');
+    setPreview(null);
+
+    try {
+      // Read file as base64
+      const base64 = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result.split(',')[1]);
+        reader.onerror = () => reject(new Error('Datei konnte nicht gelesen werden'));
+        reader.readAsDataURL(file);
+      });
+
+      // Determine media type
+      const mediaType = file.type || 'image/png';
+
+      // Call Claude API
+      const response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-20250514',
+          max_tokens: 1000,
+          messages: [{
+            role: 'user',
+            content: [
+              {
+                type: 'image',
+                source: { type: 'base64', media_type: mediaType, data: base64 },
+              },
+              {
+                type: 'text',
+                text: `Analysiere diesen FDDB-Screenshot. Extrahiere ALLE Lebensmitteleinträge mit ihren Nährwerten.
+
+Antworte NUR mit einem JSON-Array (kein Markdown, keine Erklärung, keine Backticks). Jedes Element:
+{"name": "Produktname", "amount_g": Menge_in_Gramm, "kcal": Kalorien, "protein": Protein_in_g, "carbs": Kohlenhydrate_in_g, "fat": Fett_in_g}
+
+Regeln:
+- Menge immer in Gramm (ml = g)
+- Wenn "1 Stück" oder "1 Portion" steht, nimm die angezeigte Grammzahl
+- Runde auf ganze Zahlen (außer Makros unter 1g: eine Dezimalstelle)
+- Wenn keine einzelnen Makros sichtbar sind, setze protein/carbs/fat auf 0
+- Bei Gesamtübersichten: extrahiere jeden einzelnen Eintrag, NICHT die Gesamtsumme`
+              },
+            ],
+          }],
+        }),
+      });
+
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData?.error?.message || `API Fehler: ${response.status}`);
+      }
+
+      const data = await response.json();
+      const text = data.content
+        ?.filter(b => b.type === 'text')
+        .map(b => b.text)
+        .join('') || '';
+
+      // Parse JSON response
+      const clean = text.replace(/```json|```/g, '').trim();
+      const parsed = JSON.parse(clean);
+
+      if (!Array.isArray(parsed) || parsed.length === 0) {
+        throw new Error('Keine Einträge im Screenshot erkannt');
+      }
+
+      // Convert to meal_items format
+      const importedItems = parsed.map(p => ({
+        ingredient_name: p.name || 'Unbekannt',
+        amount_g: Number(p.amount_g) || 0,
+        unit: 'g',
+        kcal: Number(p.kcal) || 0,
+        protein: Number(p.protein) || 0,
+        carbs: Number(p.carbs) || 0,
+        fat: Number(p.fat) || 0,
+        _per100: {
+          kcal: p.amount_g > 0 ? Math.round((p.kcal / p.amount_g) * 100) : 0,
+          protein: p.amount_g > 0 ? Math.round((p.protein / p.amount_g) * 100 * 10) / 10 : 0,
+          carbs: p.amount_g > 0 ? Math.round((p.carbs / p.amount_g) * 100 * 10) / 10 : 0,
+          fat: p.amount_g > 0 ? Math.round((p.fat / p.amount_g) * 100 * 10) / 10 : 0,
+        },
+      }));
+
+      setPreview({ items: importedItems });
+      setStatus('done');
+    } catch (err) {
+      console.error('FDDB import error:', err);
+      setStatus('error');
+      setErrorMsg(err.message || 'Import fehlgeschlagen');
+    }
+
+    // Reset file input
+    if (fileRef.current) fileRef.current.value = '';
+  }
+
+  function confirmImport() {
+    if (preview?.items) {
+      onImport(preview.items);
+      setPreview(null);
+      setStatus('idle');
+    }
+  }
+
+  function cancelImport() {
+    setPreview(null);
+    setStatus('idle');
+    setErrorMsg('');
+  }
+
+  return html`
+    <div class="fddb-import-section">
+      <!-- Trigger button -->
+      ${status === 'idle' && html`
+        <div class="fddb-import-trigger" onclick=${() => fileRef.current?.click()}>
+          📷 Von FDDB importieren
+        </div>
+      `}
+
+      <!-- Hidden file input -->
+      <input type="file" accept="image/*" ref=${fileRef}
+        style="display:none" onChange=${handleFile}/>
+
+      <!-- Loading state -->
+      ${status === 'loading' && html`
+        <div class="fddb-import-status loading">
+          <div class="fddb-spinner"/>
+          <span>FDDB-Screenshot wird analysiert...</span>
+        </div>
+      `}
+
+      <!-- Error state -->
+      ${status === 'error' && html`
+        <div class="fddb-import-status error">
+          <span>${errorMsg}</span>
+          <div class="fddb-retry" onclick=${() => { setStatus('idle'); setErrorMsg(''); }}>
+            Nochmal versuchen
+          </div>
+        </div>
+      `}
+
+      <!-- Preview state -->
+      ${status === 'done' && preview && html`
+        <div class="fddb-preview">
+          <div class="fddb-preview-title">${preview.items.length} Einträge erkannt:</div>
+          <div class="fddb-preview-list">
+            ${preview.items.map(it => html`
+              <div class="fddb-preview-item">
+                <span class="fddb-preview-name">${it.amount_g}g ${it.ingredient_name}</span>
+                <span class="fddb-preview-macros">${n0(it.kcal)} kcal · P${n0(it.protein)} C${n0(it.carbs)} F${n0(it.fat)}</span>
+              </div>
+            `)}
+          </div>
+          <div class="fddb-preview-actions">
+            <div class="fddb-preview-btn cancel" onclick=${cancelImport}>Abbrechen</div>
+            <div class="fddb-preview-btn confirm" onclick=${confirmImport}>Übernehmen</div>
+          </div>
+        </div>
+      `}
+    </div>
+  `;
+}
+
 // ── Edit Meal Bottom Sheet ──
 
 export function EditMealSheet({ meal, slot, targets, onSave, onClose, siblingCount }) {
@@ -492,6 +682,14 @@ export function EditMealSheet({ meal, slot, targets, onSave, onClose, siblingCou
           ${items.length === 0 && html`
             <div class="sheet-add-item" style="margin-top:12px" onclick=${addItem}>+ Zutat hinzufügen</div>
           `}
+
+          <!-- FDDB Screenshot Import -->
+          <${FddbImport} onImport=${(importedItems) => {
+            const newItems = [...items, ...importedItems];
+            setItems(newItems);
+            recalcFromItems(newItems);
+            setPer100Mode(null);
+          }}/>
 
           <!-- Direct Macros -->
           <div class="sheet-direct-toggle" onclick=${() => setShowDirectMacros(!showDirectMacros)}>
