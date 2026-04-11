@@ -12,6 +12,7 @@ import {
   getMealsForDay, updateDayType, updateDayTotals,
   upsertMeal, deleteMeal, getDayTypeTargets, importWeekData,
   findSiblingMeals, updateMealMacros, replaceMealItems, recalcDayTotals,
+  getRecipesForWeek,
 } from './db.js';
 import {
   Icons, WeekStrip, MacroBars, SegmentedPicker,
@@ -498,8 +499,10 @@ function MealplanScreen({ user }) {
   const [weekDates, setWeekDates] = useState(getWeekDates(getWeekStart(today())));
   const [daysData, setDaysData] = useState([]);
   const [allMeals, setAllMeals] = useState({}); // { date: [meals] }
+  const [recipeDetails, setRecipeDetails] = useState([]); // from recipes table
   const [loading, setLoading] = useState(true);
   const [openRecipe, setOpenRecipe] = useState(null); // recipe_name
+  const [openSection, setOpenSection] = useState('servings'); // 'servings' | 'ingredients' | 'steps'
 
   useEffect(() => { loadMealplan(weekStart); }, [weekStart, user]);
 
@@ -522,6 +525,10 @@ function MealplanScreen({ user }) {
       }
       setDaysData(allDays);
       setAllMeals(mealsMap);
+
+      // Load recipe details
+      const recs = await getRecipesForWeek(week.id);
+      setRecipeDetails(recs);
     } catch (e) { console.error('MealplanScreen error:', e); }
     setLoading(false);
   }
@@ -567,6 +574,15 @@ function MealplanScreen({ user }) {
       dayMeals.forEach(m => { mealsByPeriod.saSo[m.slot] = m.recipe_name; });
     }
   });
+
+  // Helper: find recipe detail by name
+  function getDetail(recipeName) {
+    return recipeDetails.find(r => r.name === recipeName);
+  }
+
+  // Person labels
+  const personLabels = { katja: 'Katja', leander: 'Leander', matthias: 'Matthias' };
+  const personColors = { katja: '#0C447C', leander: '#085041', matthias: '#5C3D1A' };
 
   const dateRange = `${formatDateDisplay(weekDates[0])} – ${formatDateDisplay(weekDates[6])}`;
 
@@ -629,10 +645,15 @@ function MealplanScreen({ user }) {
               const occurrences = weekdayMeals[r.recipe_name] || [];
               const days = occurrences.map(o => weekdayShort(String(o.date).slice(0, 10))).join(', ');
               const isMealPrep = occurrences.length >= 3;
+              const detail = getDetail(r.recipe_name);
+              const hasDetail = detail && (detail.servings?.length > 0 || detail.total_items?.length > 0 || detail.steps?.length > 0);
 
               return html`
                 <div class="mp-recipe-card">
-                  <div class="mp-recipe-header" onclick=${() => setOpenRecipe(isOpen ? null : r.recipe_name)}>
+                  <div class="mp-recipe-header" onclick=${() => {
+                    setOpenRecipe(isOpen ? null : r.recipe_name);
+                    setOpenSection('servings');
+                  }}>
                     <div class="mp-recipe-info">
                       <div class="mp-recipe-name">
                         ${r.recipe_name}
@@ -650,16 +671,89 @@ function MealplanScreen({ user }) {
                     </div>
                     <div class="meal-chevron">${isOpen ? Icons.chevUp : Icons.chevDown}</div>
                   </div>
-                  ${isOpen && items.length > 0 && html`
+                  ${isOpen && html`
                     <div class="mp-recipe-body">
-                      <div class="mp-ingredients-title">Zutaten pro Portion</div>
-                      ${items.map(it => html`
-                        <div class="mp-ingredient-row">
-                          <span class="mp-ingredient-name">${it.ingredient_name}</span>
-                          <span class="mp-ingredient-amount">${n0(it.amount_g)}${it.unit || 'g'}</span>
-                          <span class="mp-ingredient-kcal">${n0(it.kcal)} kcal</span>
+                      ${detail?.description ? html`
+                        <div class="mp-recipe-desc">${detail.description}</div>
+                      ` : ''}
+
+                      <!-- Tab bar for sections -->
+                      ${hasDetail ? html`
+                        <div class="mp-tab-bar">
+                          <div class="mp-tab ${openSection === 'servings' ? 'active' : ''}"
+                            onclick=${() => setOpenSection('servings')}>Portionen</div>
+                          <div class="mp-tab ${openSection === 'ingredients' ? 'active' : ''}"
+                            onclick=${() => setOpenSection('ingredients')}>Zutaten</div>
+                          <div class="mp-tab ${openSection === 'steps' ? 'active' : ''}"
+                            onclick=${() => setOpenSection('steps')}>Zubereitung</div>
                         </div>
-                      `)}
+                      ` : ''}
+
+                      ${(!hasDetail || openSection === 'ingredients') && html`
+                        ${hasDetail && detail.total_items?.length > 0 ? html`
+                          <!-- Total ingredients for all portions -->
+                          <div class="mp-ingredients-title">Gesamtzutaten (alle Portionen)</div>
+                          ${detail.total_items.map(it => html`
+                            <div class="mp-ingredient-row">
+                              <span class="mp-ingredient-name">${it.ingredient_name}</span>
+                              <span class="mp-ingredient-amount">${it.amount}${it.unit || 'g'}</span>
+                            </div>
+                          `)}
+                          <div class="mp-divider"></div>
+                          <div class="mp-ingredients-title">Pro Portion (Katja)</div>
+                          ${items.map(it => html`
+                            <div class="mp-ingredient-row">
+                              <span class="mp-ingredient-name">${it.ingredient_name}</span>
+                              <span class="mp-ingredient-amount">${n0(it.amount_g)}${it.unit || 'g'}</span>
+                              <span class="mp-ingredient-kcal">${n0(it.kcal)} kcal</span>
+                            </div>
+                          `)}
+                        ` : html`
+                          <!-- Fallback: only per-portion items -->
+                          <div class="mp-ingredients-title">Zutaten pro Portion</div>
+                          ${items.map(it => html`
+                            <div class="mp-ingredient-row">
+                              <span class="mp-ingredient-name">${it.ingredient_name}</span>
+                              <span class="mp-ingredient-amount">${n0(it.amount_g)}${it.unit || 'g'}</span>
+                              <span class="mp-ingredient-kcal">${n0(it.kcal)} kcal</span>
+                            </div>
+                          `)}
+                        `}
+                      `}
+
+                      ${openSection === 'servings' && hasDetail && html`
+                        <div class="mp-servings-section">
+                          ${(detail.servings || []).map(s => {
+                            const total = s.days.length * s.portion_factor;
+                            const portionLabel = s.portion_factor === 1 ? 'volle' : s.portion_factor === 0.5 ? 'halbe' : `${s.portion_factor}×`;
+                            return html`
+                              <div class="mp-serving-row">
+                                <div class="mp-serving-person" style="color:${personColors[s.person] || '#333'}">
+                                  ${personLabels[s.person] || s.person}
+                                </div>
+                                <div class="mp-serving-detail">
+                                  <span class="mp-serving-days">${s.days.join(', ')}</span>
+                                  <span class="mp-serving-count">${s.days.length}× ${portionLabel} Portion = ${total} Portionen</span>
+                                </div>
+                              </div>
+                            `;
+                          })}
+                          <div class="mp-serving-total">
+                            Gesamt: ${(detail.servings || []).reduce((sum, s) => sum + s.days.length * s.portion_factor, 0)} Portionen
+                          </div>
+                        </div>
+                      `}
+
+                      ${openSection === 'steps' && hasDetail && html`
+                        <div class="mp-steps-section">
+                          ${(detail.steps || []).map((step, i) => html`
+                            <div class="mp-step-row">
+                              <span class="mp-step-num">${i + 1}</span>
+                              <span class="mp-step-text">${step}</span>
+                            </div>
+                          `)}
+                        </div>
+                      `}
                     </div>
                   `}
                 </div>
