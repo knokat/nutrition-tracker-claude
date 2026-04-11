@@ -292,12 +292,50 @@ export function LoginScreen({ onLogin }) {
 
 // ── Edit Meal Bottom Sheet ──
 
-export function EditMealSheet({ meal, slot, targets, onSave, onClose }) {
+export function EditMealSheet({ meal, slot, targets, onSave, onClose, siblingCount }) {
   const [name, setName] = useState(meal?.recipe_name || slot?.label || '');
+  const [items, setItems] = useState(() => {
+    const existing = (meal?.meal_items || []).map(it => ({ ...it }));
+    return existing.length > 0 ? existing : [];
+  });
   const [kcal, setKcal] = useState(meal?.kcal || 0);
   const [protein, setProtein] = useState(meal?.protein || 0);
   const [carbs, setCarbs] = useState(meal?.carbs || 0);
   const [fat, setFat] = useState(meal?.fat || 0);
+  const [scope, setScope] = useState('today'); // 'today' or 'all'
+  const [showDirectMacros, setShowDirectMacros] = useState(items.length === 0);
+
+  // Recalc macros from items when items change
+  function recalcFromItems(updatedItems) {
+    const totals = updatedItems.reduce((acc, it) => ({
+      kcal: acc.kcal + (Number(it.kcal) || 0),
+      protein: acc.protein + (Number(it.protein) || 0),
+      carbs: acc.carbs + (Number(it.carbs) || 0),
+      fat: acc.fat + (Number(it.fat) || 0),
+    }), { kcal: 0, protein: 0, carbs: 0, fat: 0 });
+    setKcal(Math.round(totals.kcal));
+    setProtein(Math.round(totals.protein));
+    setCarbs(Math.round(totals.carbs));
+    setFat(Math.round(totals.fat));
+  }
+
+  function updateItem(idx, field, value) {
+    const updated = items.map((it, i) => i === idx ? { ...it, [field]: value } : it);
+    setItems(updated);
+    if (['kcal', 'protein', 'carbs', 'fat'].includes(field)) {
+      recalcFromItems(updated);
+    }
+  }
+
+  function removeItem(idx) {
+    const updated = items.filter((_, i) => i !== idx);
+    setItems(updated);
+    recalcFromItems(updated);
+  }
+
+  function addItem() {
+    setItems([...items, { ingredient_name: '', amount_g: 0, unit: 'g', kcal: 0, protein: 0, carbs: 0, fat: 0 }]);
+  }
 
   const save = () => {
     onSave({
@@ -308,8 +346,13 @@ export function EditMealSheet({ meal, slot, targets, onSave, onClose }) {
       protein: Number(protein),
       carbs: Number(carbs),
       fat: Number(fat),
+      _items: items.filter(it => it.ingredient_name),
+      _scope: scope,
+      _originalRecipeName: meal?.recipe_name,
     });
   };
+
+  const hasSiblings = (siblingCount || 0) > 1;
 
   return html`
     <div class="sheet-overlay" onclick=${onClose}>
@@ -323,29 +366,81 @@ export function EditMealSheet({ meal, slot, targets, onSave, onClose }) {
           <input class="sheet-input" value=${name}
             onInput=${e => setName(e.target.value)}/>
 
-          <label class="sheet-label" style="margin-top: 16px">Makros direkt eingeben</label>
-          <div class="sheet-macros-grid">
-            <div class="sheet-macro">
-              <span class="sheet-macro-label" style="color:${MACRO_COLORS.kcal}">kcal</span>
-              <input type="number" class="sheet-macro-input" value=${kcal}
-                onInput=${e => setKcal(e.target.value)}/>
+          <!-- Items List -->
+          ${items.length > 0 && html`
+            <label class="sheet-label" style="margin-top: 16px">Zutaten</label>
+            <div class="sheet-items">
+              ${items.map((it, idx) => html`
+                <div class="sheet-item-row">
+                  <input class="sheet-item-name" value=${it.ingredient_name}
+                    placeholder="Zutat"
+                    onInput=${e => updateItem(idx, 'ingredient_name', e.target.value)}/>
+                  <input type="number" class="sheet-item-amount" value=${it.amount_g}
+                    placeholder="g"
+                    onInput=${e => updateItem(idx, 'amount_g', Number(e.target.value))}/>
+                  <span class="sheet-item-unit">${it.unit || 'g'}</span>
+                  <div class="sheet-item-remove" onclick=${() => removeItem(idx)}>×</div>
+                </div>
+                <div class="sheet-item-macros-row">
+                  <input type="number" class="sheet-item-macro" placeholder="kcal" value=${it.kcal}
+                    onInput=${e => updateItem(idx, 'kcal', Number(e.target.value))}/>
+                  <input type="number" class="sheet-item-macro" placeholder="P" value=${it.protein}
+                    onInput=${e => updateItem(idx, 'protein', Number(e.target.value))}/>
+                  <input type="number" class="sheet-item-macro" placeholder="C" value=${it.carbs}
+                    onInput=${e => updateItem(idx, 'carbs', Number(e.target.value))}/>
+                  <input type="number" class="sheet-item-macro" placeholder="F" value=${it.fat}
+                    onInput=${e => updateItem(idx, 'fat', Number(e.target.value))}/>
+                </div>
+              `)}
+              <div class="sheet-add-item" onclick=${addItem}>+ Zutat hinzufügen</div>
             </div>
-            <div class="sheet-macro">
-              <span class="sheet-macro-label" style="color:${MACRO_COLORS.protein}">Protein</span>
-              <input type="number" class="sheet-macro-input" value=${protein}
-                onInput=${e => setProtein(e.target.value)}/>
-            </div>
-            <div class="sheet-macro">
-              <span class="sheet-macro-label" style="color:${MACRO_COLORS.carbs}">Carbs</span>
-              <input type="number" class="sheet-macro-input" value=${carbs}
-                onInput=${e => setCarbs(e.target.value)}/>
-            </div>
-            <div class="sheet-macro">
-              <span class="sheet-macro-label" style="color:${MACRO_COLORS.fat}">Fett</span>
-              <input type="number" class="sheet-macro-input" value=${fat}
-                onInput=${e => setFat(e.target.value)}/>
-            </div>
+          `}
+
+          <!-- Direct Macros -->
+          <div class="sheet-direct-toggle" onclick=${() => setShowDirectMacros(!showDirectMacros)}>
+            ${items.length > 0 ? 'Oder Makros direkt eingeben' : 'Makros'} ${showDirectMacros ? '▲' : '▼'}
           </div>
+          ${showDirectMacros && html`
+            <div class="sheet-macros-grid">
+              <div class="sheet-macro">
+                <span class="sheet-macro-label" style="color:${MACRO_COLORS.kcal}">kcal</span>
+                <input type="number" class="sheet-macro-input" value=${kcal}
+                  onInput=${e => setKcal(e.target.value)}/>
+              </div>
+              <div class="sheet-macro">
+                <span class="sheet-macro-label" style="color:${MACRO_COLORS.protein}">Protein</span>
+                <input type="number" class="sheet-macro-input" value=${protein}
+                  onInput=${e => setProtein(e.target.value)}/>
+              </div>
+              <div class="sheet-macro">
+                <span class="sheet-macro-label" style="color:${MACRO_COLORS.carbs}">Carbs</span>
+                <input type="number" class="sheet-macro-input" value=${carbs}
+                  onInput=${e => setCarbs(e.target.value)}/>
+              </div>
+              <div class="sheet-macro">
+                <span class="sheet-macro-label" style="color:${MACRO_COLORS.fat}">Fett</span>
+                <input type="number" class="sheet-macro-input" value=${fat}
+                  onInput=${e => setFat(e.target.value)}/>
+              </div>
+            </div>
+          `}
+
+          <!-- Scope Toggle -->
+          ${hasSiblings && html`
+            <div class="sheet-scope">
+              <div class="sheet-scope-label">Änderung anwenden für:</div>
+              <div class="sheet-scope-options">
+                <div class="sheet-scope-opt ${scope === 'today' ? 'active' : ''}"
+                  onclick=${() => setScope('today')}>
+                  Nur heute
+                </div>
+                <div class="sheet-scope-opt ${scope === 'all' ? 'active' : ''}"
+                  onclick=${() => setScope('all')}>
+                  Alle Tage (${siblingCount})
+                </div>
+              </div>
+            </div>
+          `}
         </div>
         <div class="sheet-footer">
           <div class="sheet-btn cancel" onclick=${onClose}>Abbrechen</div>
