@@ -33,10 +33,11 @@ export function ProgressRing({ percent, size = 40, stroke = 3, isActive, dayNum,
   const color = kcalColor(pct);
 
   if (isActive) {
-    // Today: filled circle
+    // Today: filled circle — use warn color when over target
+    const bgColor = color; // uses kcalColor which returns blue/purple/red
     return html`
       <svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
-        <circle cx="${size/2}" cy="${size/2}" r="${r + stroke/2}" fill="#205781"/>
+        <circle cx="${size/2}" cy="${size/2}" r="${r + stroke/2}" fill="${bgColor}"/>
         <circle cx="${size/2}" cy="${size/2}" r="${r}" fill="none"
           stroke="rgba(255,255,255,0.3)" stroke-width="${stroke}"/>
         ${hasData && html`
