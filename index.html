@@ -388,37 +388,67 @@
     .meal-items {
       display: flex;
       flex-direction: column;
-      gap: 6px;
+      gap: 4px;
       margin-bottom: 10px;
     }
 
     .meal-item-row {
       display: flex;
+      justify-content: space-between;
       align-items: baseline;
       gap: 8px;
       font-size: 13px;
+      padding: 2px 0;
     }
 
-    .item-name {
-      flex: 1;
-      color: var(--text-1);
+    .item-left {
+      display: flex;
+      gap: 6px;
+      align-items: baseline;
       min-width: 0;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
+      flex: 1;
     }
 
     .item-amount {
       color: var(--text-2);
       font-variant-numeric: tabular-nums;
       flex-shrink: 0;
+      min-width: 36px;
+    }
+
+    .item-name {
+      color: var(--text-1);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .item-right {
+      display: flex;
+      gap: 6px;
+      align-items: baseline;
+      flex-shrink: 0;
+    }
+
+    .item-kcal {
+      font-variant-numeric: tabular-nums;
+      color: var(--text-1);
+      font-weight: 500;
+      min-width: 28px;
+      text-align: right;
     }
 
     .item-macros {
       color: var(--text-3);
       font-size: 11px;
       font-variant-numeric: tabular-nums;
-      flex-shrink: 0;
+    }
+
+    .meal-card-actions {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding-top: 4px;
     }
 
     .meal-edit-link {
@@ -426,9 +456,16 @@
       font-weight: 500;
       color: var(--kcal);
       cursor: pointer;
-      padding-top: 4px;
     }
     .meal-edit-link:active { opacity: 0.6; }
+
+    .meal-delete-link {
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--warn-high);
+      cursor: pointer;
+    }
+    .meal-delete-link:active { opacity: 0.6; }
 
     /* ── Day Total ── */
     .day-total {
