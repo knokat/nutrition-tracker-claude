@@ -165,6 +165,65 @@ export async function deleteMealItem(itemId) {
   if (error) throw error;
 }
 
+// ── Bulk update: all meals with same recipe_name in a week ──
+
+export async function findSiblingMeals(weekId, recipeName, slot) {
+  // Find all meals in this week with the same recipe_name and slot
+  const { data: days, error: dErr } = await supabase
+    .from('days')
+    .select('id')
+    .eq('week_id', weekId);
+  if (dErr) throw dErr;
+  if (!days || days.length === 0) return [];
+
+  const dayIds = days.map(d => d.id);
+  const { data: meals, error: mErr } = await supabase
+    .from('meals')
+    .select('*, meal_items(*)')
+    .in('day_id', dayIds)
+    .eq('recipe_name', recipeName)
+    .eq('slot', slot);
+  if (mErr) throw mErr;
+  return meals || [];
+}
+
+export async function updateMealMacros(mealId, updates) {
+  const { error } = await supabase
+    .from('meals')
+    .update(updates)
+    .eq('id', mealId);
+  if (error) throw error;
+}
+
+export async function replaceMealItems(mealId, newItems) {
+  // Delete old items
+  const { error: delErr } = await supabase
+    .from('meal_items')
+    .delete()
+    .eq('meal_id', mealId);
+  if (delErr) throw delErr;
+
+  // Insert new items
+  if (newItems && newItems.length > 0) {
+    const { error: insErr } = await supabase
+      .from('meal_items')
+      .insert(newItems.map(it => ({ ...it, meal_id: mealId })));
+    if (insErr) throw insErr;
+  }
+}
+
+export async function recalcDayTotals(dayId) {
+  const meals = await getMealsForDay(dayId);
+  const totals = meals.reduce((acc, m) => ({
+    total_kcal: acc.total_kcal + (m.kcal || 0),
+    total_protein: acc.total_protein + (m.protein || 0),
+    total_carbs: acc.total_carbs + (m.carbs || 0),
+    total_fat: acc.total_fat + (m.fat || 0),
+  }), { total_kcal: 0, total_protein: 0, total_carbs: 0, total_fat: 0 });
+  await updateDayTotals(dayId, totals);
+  return totals;
+}
+
 // ── Day Type Targets ──
 
 export async function getDayTypeTargets() {
