@@ -77,13 +77,13 @@ export function WeekStrip({ dates, daysData, selectedDate, onSelect, targets }) 
   return html`
     <div class="week-strip">
       ${dates.map(dateStr => {
-        const dayData = daysData.find(d => d.date === dateStr);
+        const dayData = daysData.find(d => String(d.date).slice(0, 10) === dateStr);
         const active = isToday(dateStr);
         const selected = dateStr === selectedDate;
         const hasData = dayData && dayData.total_kcal > 0;
         const target = targets && dayData ? (targets[dayData.day_type]?.target_kcal || 2200) : 2200;
         const pct = hasData ? macroPercent(dayData.total_kcal, target) : 0;
-        const dayNum = new Date(dateStr + 'T00:00').getDate();
+        const dayNum = parseInt(dateStr.slice(8, 10), 10);
 
         return html`
           <div class="week-day ${selected ? 'selected' : ''}" onclick=${() => onSelect(dateStr)}>
@@ -302,10 +302,11 @@ export function EditMealSheet({ meal, slot, targets, onSave, onClose, siblingCou
   const [protein, setProtein] = useState(meal?.protein || 0);
   const [carbs, setCarbs] = useState(meal?.carbs || 0);
   const [fat, setFat] = useState(meal?.fat || 0);
-  const [scope, setScope] = useState('today'); // 'today' or 'all'
+  const [scope, setScope] = useState('today');
   const [showDirectMacros, setShowDirectMacros] = useState(items.length === 0);
+  const [undoStack, setUndoStack] = useState([]); // for undo deleted items
+  const [per100Mode, setPer100Mode] = useState(null); // index of item in per-100g edit mode
 
-  // Recalc macros from items when items change
   function recalcFromItems(updatedItems) {
     const totals = updatedItems.reduce((acc, it) => ({
       kcal: acc.kcal + (Number(it.kcal) || 0),
@@ -328,13 +329,68 @@ export function EditMealSheet({ meal, slot, targets, onSave, onClose, siblingCou
   }
 
   function removeItem(idx) {
+    const removed = items[idx];
+    setUndoStack([...undoStack, { item: removed, index: idx }]);
     const updated = items.filter((_, i) => i !== idx);
     setItems(updated);
     recalcFromItems(updated);
   }
 
+  function undoRemove() {
+    if (undoStack.length === 0) return;
+    const last = undoStack[undoStack.length - 1];
+    const newStack = undoStack.slice(0, -1);
+    setUndoStack(newStack);
+    const updated = [...items];
+    updated.splice(last.index, 0, last.item);
+    setItems(updated);
+    recalcFromItems(updated);
+  }
+
   function addItem() {
-    setItems([...items, { ingredient_name: '', amount_g: 0, unit: 'g', kcal: 0, protein: 0, carbs: 0, fat: 0 }]);
+    setItems([...items, {
+      ingredient_name: '', amount_g: 0, unit: 'g',
+      kcal: 0, protein: 0, carbs: 0, fat: 0,
+      _per100: { kcal: 0, protein: 0, carbs: 0, fat: 0 },
+    }]);
+    setPer100Mode(items.length); // open per-100g mode for new item
+  }
+
+  function updatePer100(idx, field, value) {
+    const item = items[idx];
+    const per100 = { ...(item._per100 || {}), [field]: Number(value) || 0 };
+    const amount = Number(item.amount_g) || 0;
+    const factor = amount / 100;
+    const updated = items.map((it, i) => i === idx ? {
+      ...it,
+      _per100: per100,
+      kcal: Math.round(per100.kcal * factor),
+      protein: Math.round(per100.protein * factor * 10) / 10,
+      carbs: Math.round(per100.carbs * factor * 10) / 10,
+      fat: Math.round(per100.fat * factor * 10) / 10,
+    } : it);
+    setItems(updated);
+    recalcFromItems(updated);
+  }
+
+  function updateAmountWithPer100(idx, newAmount) {
+    const item = items[idx];
+    const per100 = item._per100 || {};
+    const factor = (Number(newAmount) || 0) / 100;
+    const hasPer100 = per100.kcal || per100.protein || per100.carbs || per100.fat;
+    const updated = items.map((it, i) => {
+      if (i !== idx) return it;
+      const base = { ...it, amount_g: Number(newAmount) || 0 };
+      if (hasPer100) {
+        base.kcal = Math.round((per100.kcal || 0) * factor);
+        base.protein = Math.round((per100.protein || 0) * factor * 10) / 10;
+        base.carbs = Math.round((per100.carbs || 0) * factor * 10) / 10;
+        base.fat = Math.round((per100.fat || 0) * factor * 10) / 10;
+      }
+      return base;
+    });
+    setItems(updated);
+    recalcFromItems(updated);
   }
 
   const save = () => {
@@ -346,7 +402,10 @@ export function EditMealSheet({ meal, slot, targets, onSave, onClose, siblingCou
       protein: Number(protein),
       carbs: Number(carbs),
       fat: Number(fat),
-      _items: items.filter(it => it.ingredient_name),
+      _items: items.filter(it => it.ingredient_name).map(it => {
+        const { _per100, ...rest } = it;
+        return rest;
+      }),
       _scope: scope,
       _originalRecipeName: meal?.recipe_name,
     });
@@ -358,10 +417,11 @@ export function EditMealSheet({ meal, slot, targets, onSave, onClose, siblingCou
     <div class="sheet-overlay" onclick=${onClose}>
       <div class="sheet" onclick=${e => e.stopPropagation()}>
         <div class="sheet-handle"/>
-        <div class="sheet-header">
+        <div class="sheet-top-bar">
           <h3>${slot?.icon} ${slot?.label || 'Mahlzeit'}</h3>
+          <div class="sheet-close" onclick=${onClose}>×</div>
         </div>
-        <div class="sheet-body">
+        <div class="sheet-scroll">
           <label class="sheet-label">Rezeptname</label>
           <input class="sheet-input" value=${name}
             onInput=${e => setName(e.target.value)}/>
@@ -371,29 +431,56 @@ export function EditMealSheet({ meal, slot, targets, onSave, onClose, siblingCou
             <label class="sheet-label" style="margin-top: 16px">Zutaten</label>
             <div class="sheet-items">
               ${items.map((it, idx) => html`
-                <div class="sheet-item-row">
-                  <input class="sheet-item-name" value=${it.ingredient_name}
-                    placeholder="Zutat"
-                    onInput=${e => updateItem(idx, 'ingredient_name', e.target.value)}/>
-                  <input type="number" class="sheet-item-amount" value=${it.amount_g}
-                    placeholder="g"
-                    onInput=${e => updateItem(idx, 'amount_g', Number(e.target.value))}/>
-                  <span class="sheet-item-unit">${it.unit || 'g'}</span>
-                  <div class="sheet-item-remove" onclick=${() => removeItem(idx)}>×</div>
-                </div>
-                <div class="sheet-item-macros-row">
-                  <input type="number" class="sheet-item-macro" placeholder="kcal" value=${it.kcal}
-                    onInput=${e => updateItem(idx, 'kcal', Number(e.target.value))}/>
-                  <input type="number" class="sheet-item-macro" placeholder="P" value=${it.protein}
-                    onInput=${e => updateItem(idx, 'protein', Number(e.target.value))}/>
-                  <input type="number" class="sheet-item-macro" placeholder="C" value=${it.carbs}
-                    onInput=${e => updateItem(idx, 'carbs', Number(e.target.value))}/>
-                  <input type="number" class="sheet-item-macro" placeholder="F" value=${it.fat}
-                    onInput=${e => updateItem(idx, 'fat', Number(e.target.value))}/>
+                <div class="sheet-item-block">
+                  <div class="sheet-item-row">
+                    <input class="sheet-item-name" value=${it.ingredient_name}
+                      placeholder="Zutat"
+                      onInput=${e => updateItem(idx, 'ingredient_name', e.target.value)}/>
+                    <input type="number" class="sheet-item-amount" value=${it.amount_g}
+                      placeholder="g"
+                      onInput=${e => updateAmountWithPer100(idx, e.target.value)}/>
+                    <span class="sheet-item-unit">${it.unit || 'g'}</span>
+                    <div class="sheet-item-remove" onclick=${() => removeItem(idx)}>×</div>
+                  </div>
+                  <!-- Per 100g toggle -->
+                  <div class="sheet-per100-toggle" onclick=${() => setPer100Mode(per100Mode === idx ? null : idx)}>
+                    ${per100Mode === idx ? 'Makros pro 100g ▲' : 'Makros pro 100g ▼'}
+                  </div>
+                  ${per100Mode === idx && html`
+                    <div class="sheet-per100-row">
+                      <input type="number" class="sheet-per100-input" placeholder="kcal/100g"
+                        value=${it._per100?.kcal || ''}
+                        onInput=${e => updatePer100(idx, 'kcal', e.target.value)}/>
+                      <input type="number" class="sheet-per100-input" placeholder="P/100g"
+                        value=${it._per100?.protein || ''}
+                        onInput=${e => updatePer100(idx, 'protein', e.target.value)}/>
+                      <input type="number" class="sheet-per100-input" placeholder="C/100g"
+                        value=${it._per100?.carbs || ''}
+                        onInput=${e => updatePer100(idx, 'carbs', e.target.value)}/>
+                      <input type="number" class="sheet-per100-input" placeholder="F/100g"
+                        value=${it._per100?.fat || ''}
+                        onInput=${e => updatePer100(idx, 'fat', e.target.value)}/>
+                    </div>
+                  `}
+                  <div class="sheet-item-macros-row">
+                    <span class="sheet-item-macro-display">${n0(it.kcal)} kcal</span>
+                    <span class="sheet-item-macro-display">P ${n0(it.protein)}</span>
+                    <span class="sheet-item-macro-display">C ${n0(it.carbs)}</span>
+                    <span class="sheet-item-macro-display">F ${n0(it.fat)}</span>
+                  </div>
                 </div>
               `)}
-              <div class="sheet-add-item" onclick=${addItem}>+ Zutat hinzufügen</div>
+              <div class="sheet-item-actions">
+                <div class="sheet-add-item" onclick=${addItem}>+ Zutat hinzufügen</div>
+                ${undoStack.length > 0 && html`
+                  <div class="sheet-undo" onclick=${undoRemove}>↩ Rückgängig</div>
+                `}
+              </div>
             </div>
+          `}
+
+          ${items.length === 0 && html`
+            <div class="sheet-add-item" style="margin-top:12px" onclick=${addItem}>+ Zutat hinzufügen</div>
           `}
 
           <!-- Direct Macros -->
@@ -442,7 +529,7 @@ export function EditMealSheet({ meal, slot, targets, onSave, onClose, siblingCou
             </div>
           `}
         </div>
-        <div class="sheet-footer">
+        <div class="sheet-footer-sticky">
           <div class="sheet-btn cancel" onclick=${onClose}>Abbrechen</div>
           <div class="sheet-btn save" onclick=${save}>Speichern</div>
         </div>
