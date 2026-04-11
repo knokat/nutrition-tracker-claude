@@ -179,3 +179,23 @@ Wichtig:
 - Font: System font stack (kein Custom Font)
 - Keine Emojis im UI außer Mahlzeiten-Icons
 - Inline Styles im `<style>` Block der index.html, kein separates CSS
+
+## Edit-Sheet (Bearbeiten-Overlay)
+
+Das Edit-Sheet ist das zentrale UI für spontane Änderungen:
+
+- **X-Button** oben rechts, sticky Footer (Buttons immer sichtbar)
+- **Zutatenliste**: Name, Menge, Makros pro Zutat
+- **Pro-100g-Modus**: Aufklappbar pro Zutat — kcal/P/C/F pro 100g eingeben + Menge → automatische Berechnung
+- **Undo**: Nach Löschen einer Zutat erscheint "↩ Rückgängig"
+- **Scope**: "Nur heute" vs "Alle Tage (X)" — für Rezeptkorrekturen die alle Tage betreffen
+- **Meal löschen**: "Löschen" Link in der Meal Card, mit Bestätigungsdialog
+
+### DB-Funktionen für Edit-Sheet
+- `findSiblingMeals(weekId, recipeName, slot)` — findet alle Meals mit gleichem Rezept in der Woche
+- `updateMealMacros(mealId, updates)` — aktualisiert Makros eines einzelnen Meals
+- `replaceMealItems(mealId, newItems)` — löscht alte Items und fügt neue ein
+- `recalcDayTotals(dayId)` — berechnet Tagessummen neu aus allen Meals
+
+## Geplantes Feature: FDDB-Screenshot-Import
+Nächstes großes Feature: Foto von FDDB-Tagesübersicht oder Einzeleintrag hochladen → Claude Vision API liest Name, Menge, kcal, P, C, F aus → automatisch in Zutatenfelder eintragen.
