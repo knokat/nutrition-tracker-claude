@@ -169,7 +169,7 @@ export function SegmentedPicker({ value, options, onChange }) {
 
 // ── Meal Card ──
 
-export function MealCard({ slot, meal, onEdit }) {
+export function MealCard({ slot, meal, onEdit, onDelete }) {
   const [open, setOpen] = useState(false);
   const items = meal?.meal_items || [];
   const hasMeal = meal && (meal.kcal > 0 || items.length > 0);
@@ -208,17 +208,27 @@ export function MealCard({ slot, meal, onEdit }) {
             <div class="meal-items">
               ${items.map(it => html`
                 <div class="meal-item-row">
-                  <span class="item-name">${it.ingredient_name}</span>
-                  <span class="item-amount">${n0(it.amount_g)}${it.unit || 'g'}</span>
-                  <span class="item-macros">
-                    P${n0(it.protein)} C${n0(it.carbs)} F${n0(it.fat)}
-                  </span>
+                  <div class="item-left">
+                    <span class="item-amount">${n0(it.amount_g)}${it.unit || 'g'}</span>
+                    <span class="item-name">${it.ingredient_name}</span>
+                  </div>
+                  <div class="item-right">
+                    <span class="item-kcal">${n0(it.kcal)}</span>
+                    <span class="item-macros">P${n0(it.protein)} C${n0(it.carbs)} F${n0(it.fat)}</span>
+                  </div>
                 </div>
               `)}
             </div>
           `}
-          <div class="meal-edit-link" onclick=${() => onEdit && onEdit(meal, slot)}>
-            Bearbeiten ↗
+          <div class="meal-card-actions">
+            <div class="meal-edit-link" onclick=${() => onEdit && onEdit(meal, slot)}>
+              Bearbeiten ↗
+            </div>
+            ${onDelete && html`
+              <div class="meal-delete-link" onclick=${(e) => { e.stopPropagation(); onDelete(meal, slot); }}>
+                Löschen
+              </div>
+            `}
           </div>
         </div>
       `}
