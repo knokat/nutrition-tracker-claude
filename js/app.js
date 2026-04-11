@@ -10,7 +10,7 @@ import {
   supabase, signIn, signOut, getUser, onAuthChange,
   getOrCreateWeek, getDaysForWeek, getOrCreateDay,
   getMealsForDay, updateDayType, updateDayTotals,
-  upsertMeal, getDayTypeTargets, importWeekData,
+  upsertMeal, deleteMeal, getDayTypeTargets, importWeekData,
   findSiblingMeals, updateMealMacros, replaceMealItems, recalcDayTotals,
 } from './db.js';
 import {
@@ -117,6 +117,28 @@ function TodayScreen({ user, targets, onSettings }) {
       setDaysData(updated);
     } catch (e) {
       console.error('changeDayType error:', e);
+    }
+  }
+
+  async function handleDeleteMeal(mealToDelete) {
+    if (!dayData || !mealToDelete?.id) return;
+    if (!confirm(`"${mealToDelete.recipe_name}" für heute löschen?`)) return;
+    try {
+      await deleteMeal(mealToDelete.id);
+      const m = await getMealsForDay(dayData.id);
+      setMeals(m);
+      const totals = sumMacros(m);
+      await updateDayTotals(dayData.id, {
+        total_kcal: totals.kcal,
+        total_protein: totals.protein,
+        total_carbs: totals.carbs,
+        total_fat: totals.fat,
+      });
+      const updatedDay = { ...dayData, total_kcal: totals.kcal, total_protein: totals.protein, total_carbs: totals.carbs, total_fat: totals.fat };
+      setDayData(updatedDay);
+      setDaysData(daysData.map(d => d.id === dayData.id ? updatedDay : d));
+    } catch (e) {
+      console.error('deleteMeal error:', e);
     }
   }
 
@@ -270,6 +292,7 @@ function TodayScreen({ user, targets, onSettings }) {
                   slot=${slot}
                   meal=${meal}
                   onEdit=${(m, s) => setEditMeal({ meal: m, slot: s })}
+                  onDelete=${meal ? (m) => handleDeleteMeal(m) : null}
                 />`;
               })
           }
