@@ -863,6 +863,64 @@
       color: #fff;
     }
     .sheet-btn:active { opacity: 0.85; }
+
+    /* Sheet Items Editing */
+    .sheet-items { margin-bottom: 8px; }
+    .sheet-item-row {
+      display: flex; align-items: center; gap: 6px; margin-bottom: 4px;
+    }
+    .sheet-item-name {
+      flex: 1; padding: 8px 10px; border: 0.5px solid var(--border-1); border-radius: 8px;
+      font-size: 14px; background: var(--bg); outline: none; min-width: 0;
+    }
+    .sheet-item-name:focus { border-color: var(--kcal); }
+    .sheet-item-amount {
+      width: 56px; padding: 8px 6px; border: 0.5px solid var(--border-1); border-radius: 8px;
+      font-size: 14px; background: var(--bg); outline: none; text-align: right;
+      font-variant-numeric: tabular-nums;
+    }
+    .sheet-item-amount:focus { border-color: var(--kcal); }
+    .sheet-item-unit { font-size: 12px; color: var(--text-3); width: 14px; }
+    .sheet-item-remove {
+      width: 28px; height: 28px; display: flex; align-items: center; justify-content: center;
+      font-size: 18px; color: var(--text-3); cursor: pointer; border-radius: 6px; flex-shrink: 0;
+    }
+    .sheet-item-remove:active { background: var(--border-2); color: var(--warn-high); }
+
+    .sheet-item-macros-row {
+      display: flex; gap: 4px; margin-bottom: 8px; padding-left: 2px;
+    }
+    .sheet-item-macro {
+      width: 25%; padding: 6px; border: 0.5px solid var(--border-2); border-radius: 6px;
+      font-size: 12px; background: var(--bg); outline: none; text-align: center;
+      font-variant-numeric: tabular-nums;
+    }
+    .sheet-item-macro:focus { border-color: var(--kcal); }
+
+    .sheet-add-item {
+      font-size: 13px; color: var(--kcal); font-weight: 500; cursor: pointer;
+      padding: 8px 0 4px; -webkit-tap-highlight-color: transparent;
+    }
+    .sheet-add-item:active { opacity: 0.6; }
+
+    .sheet-direct-toggle {
+      font-size: 12px; color: var(--text-3); cursor: pointer; margin: 12px 0 8px;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    /* Scope Toggle */
+    .sheet-scope { margin-top: 16px; }
+    .sheet-scope-label { font-size: 12px; font-weight: 600; color: var(--text-2); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.4px; }
+    .sheet-scope-options { display: flex; gap: 8px; }
+    .sheet-scope-opt {
+      flex: 1; text-align: center; padding: 10px; font-size: 13px; font-weight: 500;
+      border-radius: 10px; cursor: pointer; border: 1.5px solid var(--border-2);
+      color: var(--text-2); -webkit-tap-highlight-color: transparent; transition: all 0.15s;
+    }
+    .sheet-scope-opt.active {
+      border-color: var(--kcal); background: rgba(32, 87, 129, 0.06); color: var(--kcal); font-weight: 600;
+    }
+    .sheet-scope-opt:active { opacity: 0.8; }
   </style>
 </head>
 <body>
