@@ -102,6 +102,7 @@ export const MEAL_SLOTS = {
     { key: 'preworkout', label: 'PreWorkout',        icon: '⚡' },
     { key: 'shake',      label: 'Whey Shake',        icon: '🥤' },
     { key: 'dinner',     label: 'Brotzeit',          icon: '🍞' },
+    { key: 'snack3',     label: 'Snack 3',          icon: '🍫' },
   ],
   rest: [
     { key: 'breakfast',  label: 'Frühstück',        icon: '🥣' },
@@ -109,6 +110,7 @@ export const MEAL_SLOTS = {
     { key: 'lunch',      label: 'Mittagessen',       icon: '🍽️' },
     { key: 'snack2',     label: 'Kaffee+Schoko',    icon: '☕' },
     { key: 'dinner',     label: 'Brotzeit',          icon: '🍞' },
+    { key: 'snack3',     label: 'Snack 3',          icon: '🍫' },
   ],
   friday: [
     { key: 'breakfast',  label: 'Frühstück',        icon: '🥣' },
@@ -116,6 +118,7 @@ export const MEAL_SLOTS = {
     { key: 'lunch',      label: 'Caprese',           icon: '🍅' },
     { key: 'snack2',     label: 'Kaffee+Schoko',    icon: '☕' },
     { key: 'dinner',     label: 'Movie Night',       icon: '🎬' },
+    { key: 'snack3',     label: 'Snack 3',          icon: '🍫' },
   ],
 };
 
