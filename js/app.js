@@ -11,6 +11,7 @@ import {
   getOrCreateWeek, getDaysForWeek, getOrCreateDay,
   getMealsForDay, updateDayType, updateDayTotals,
   upsertMeal, getDayTypeTargets, importWeekData,
+  findSiblingMeals, updateMealMacros, replaceMealItems, recalcDayTotals,
 } from './db.js';
 import {
   Icons, WeekStrip, MacroBars, SegmentedPicker,
@@ -122,17 +123,50 @@ function TodayScreen({ user, targets, onSettings }) {
   async function handleSaveMeal(mealData) {
     if (!dayData) return;
     try {
-      const saved = await upsertMeal({
-        ...mealData,
-        day_id: dayData.id,
-        person: 'katja',
-      });
+      const { _items, _scope, _originalRecipeName, ...mealFields } = mealData;
 
-      // Reload meals
+      if (_scope === 'all' && _originalRecipeName) {
+        // Find all sibling meals with same recipe_name in this week
+        const week = await getOrCreateWeek(user.id, weekStart);
+        const siblings = await findSiblingMeals(week.id, _originalRecipeName, mealFields.slot);
+        const affectedDayIds = new Set();
+
+        for (const sib of siblings) {
+          await updateMealMacros(sib.id, {
+            recipe_name: mealFields.recipe_name,
+            kcal: mealFields.kcal,
+            protein: mealFields.protein,
+            carbs: mealFields.carbs,
+            fat: mealFields.fat,
+          });
+          if (_items && _items.length > 0) {
+            await replaceMealItems(sib.id, _items);
+          }
+          affectedDayIds.add(sib.day_id);
+        }
+
+        // Recalc totals for all affected days
+        for (const dayId of affectedDayIds) {
+          await recalcDayTotals(dayId);
+        }
+      } else {
+        // Single day update
+        await upsertMeal({
+          ...mealFields,
+          day_id: dayData.id,
+          person: 'katja',
+        });
+
+        if (_items && _items.length > 0 && mealFields.id) {
+          await replaceMealItems(mealFields.id, _items);
+        }
+      }
+
+      // Reload current day meals
       const m = await getMealsForDay(dayData.id);
       setMeals(m);
 
-      // Update day totals
+      // Recalc and update current day totals
       const totals = sumMacros(m);
       await updateDayTotals(dayData.id, {
         total_kcal: totals.kcal,
@@ -148,13 +182,31 @@ function TodayScreen({ user, targets, onSettings }) {
         total_fat: totals.fat,
       };
       setDayData(updatedDay);
-      setDaysData(daysData.map(d => d.id === dayData.id ? updatedDay : d));
+
+      // Reload all week days to refresh rings
+      if (_scope === 'all') {
+        await loadWeek(weekStart);
+      } else {
+        setDaysData(daysData.map(d => d.id === dayData.id ? updatedDay : d));
+      }
 
       setEditMeal(null);
     } catch (e) {
       console.error('saveMeal error:', e);
     }
   }
+
+  // Count sibling meals for scope toggle
+  const [siblingCount, setSiblingCount] = useState(0);
+  useEffect(() => {
+    if (editMeal?.meal?.recipe_name && !editMeal?.meal?.is_standard) {
+      getOrCreateWeek(user.id, weekStart).then(week =>
+        findSiblingMeals(week.id, editMeal.meal.recipe_name, editMeal.meal.slot)
+      ).then(siblings => setSiblingCount(siblings.length)).catch(() => setSiblingCount(0));
+    } else {
+      setSiblingCount(0);
+    }
+  }, [editMeal]);
 
   const dayType = dayData?.day_type || 'rest';
   const slots = getSlotsForType(dayType);
@@ -243,6 +295,7 @@ function TodayScreen({ user, targets, onSettings }) {
           meal=${editMeal.meal}
           slot=${editMeal.slot}
           targets=${dayTargets}
+          siblingCount=${siblingCount}
           onSave=${handleSaveMeal}
           onClose=${() => setEditMeal(null)}
         />
