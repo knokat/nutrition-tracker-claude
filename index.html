@@ -638,6 +638,46 @@
     .mp-standard-name { color: var(--text-2); }
     .mp-standard-kcal { color: var(--text-3); font-variant-numeric: tabular-nums; font-size: 12px; }
 
+    /* ── Mealplan Tab Bar & Detail Sections ── */
+    .mp-recipe-desc { font-size: 12px; color: var(--text-2); padding: 0 12px 8px; font-style: italic; }
+    .mp-tab-bar {
+      display: flex; gap: 0; border-bottom: 1px solid var(--border-2); margin: 0 12px 10px;
+    }
+    .mp-tab {
+      flex: 1; text-align: center; padding: 7px 0; font-size: 12px; font-weight: 600;
+      color: var(--text-3); cursor: pointer; border-bottom: 2px solid transparent;
+      transition: color 0.15s, border-color 0.15s;
+    }
+    .mp-tab.active { color: #205781; border-bottom-color: #205781; }
+    .mp-divider { height: 1px; background: var(--border-2); margin: 10px 12px; }
+
+    /* Servings */
+    .mp-servings-section { padding: 4px 12px 8px; }
+    .mp-serving-row {
+      display: flex; align-items: baseline; gap: 10px; padding: 6px 0;
+      border-bottom: 0.5px solid var(--border-2);
+    }
+    .mp-serving-row:last-of-type { border-bottom: none; }
+    .mp-serving-person { font-weight: 600; font-size: 13px; min-width: 64px; }
+    .mp-serving-detail { display: flex; flex-direction: column; gap: 2px; }
+    .mp-serving-days { font-size: 12px; color: var(--text-1); }
+    .mp-serving-count { font-size: 11px; color: var(--text-3); }
+    .mp-serving-total {
+      margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border-2);
+      font-size: 12px; font-weight: 600; color: var(--text-2);
+    }
+
+    /* Steps */
+    .mp-steps-section { padding: 4px 12px 8px; }
+    .mp-step-row { display: flex; gap: 10px; padding: 6px 0; }
+    .mp-step-row + .mp-step-row { border-top: 0.5px solid var(--border-2); }
+    .mp-step-num {
+      flex-shrink: 0; width: 22px; height: 22px; border-radius: 50%;
+      background: #205781; color: #fff; font-size: 11px; font-weight: 700;
+      display: flex; align-items: center; justify-content: center; margin-top: 1px;
+    }
+    .mp-step-text { font-size: 13px; color: var(--text-1); line-height: 1.4; }
+
     /* ── Family Screen ── */
     .family-screen { padding: 0 16px 24px; }
     .family-header { padding: calc(var(--safe-top) + 12px) 0 12px; }
