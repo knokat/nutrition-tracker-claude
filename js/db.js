@@ -203,11 +203,14 @@ export async function replaceMealItems(mealId, newItems) {
     .eq('meal_id', mealId);
   if (delErr) throw delErr;
 
-  // Insert new items
+  // Insert new items (strip old id/meal_id so Supabase generates fresh UUIDs)
   if (newItems && newItems.length > 0) {
     const { error: insErr } = await supabase
       .from('meal_items')
-      .insert(newItems.map(it => ({ ...it, meal_id: mealId })));
+      .insert(newItems.map(it => {
+        const { id, meal_id, ...rest } = it;
+        return { ...rest, meal_id: mealId };
+      }));
     if (insErr) throw insErr;
   }
 }
