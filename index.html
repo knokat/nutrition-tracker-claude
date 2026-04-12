@@ -833,6 +833,7 @@
       display: flex;
       align-items: flex-end;
       justify-content: center;
+      padding-bottom: calc(56px + var(--safe-bottom));
       animation: fadeIn 0.2s ease;
     }
     @keyframes fadeIn { from { opacity: 0; } }
@@ -842,11 +843,10 @@
       border-radius: 20px 20px 0 0;
       width: 100%;
       max-width: 430px;
-      max-height: 80vh;
+      max-height: 85vh;
       display: flex;
       flex-direction: column;
       animation: slideUp 0.3s ease;
-      padding-bottom: env(safe-area-inset-bottom, 0px);
     }
     @keyframes slideUp { from { transform: translateY(100%); } }
 
