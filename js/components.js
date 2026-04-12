@@ -421,7 +421,7 @@ export function EditMealSheet({ meal, slot, targets, onSave, onClose, siblingCou
       carbs: Number(carbs),
       fat: Number(fat),
       _items: items.filter(it => it.ingredient_name).map(it => {
-        const { _per100, ...rest } = it;
+        const { _per100, id, meal_id, ...rest } = it;
         return rest;
       }),
       _scope: scope,
