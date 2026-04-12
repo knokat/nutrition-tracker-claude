@@ -1015,6 +1015,17 @@
     .sheet-per100-input:focus { background: rgba(32,87,129,0.08); }
     .sheet-per100-input::placeholder { color: var(--text-4); font-size: 10px; }
 
+    .sheet-macro-mode-picker {
+      display: flex; gap: 0; margin-bottom: 6px; border-radius: 8px;
+      overflow: hidden; border: 0.5px solid var(--border-1);
+    }
+    .sheet-macro-mode-opt {
+      flex: 1; text-align: center; padding: 5px 0; font-size: 11px; font-weight: 600;
+      color: var(--text-3); cursor: pointer; background: var(--bg);
+      -webkit-tap-highlight-color: transparent;
+    }
+    .sheet-macro-mode-opt.active { background: var(--kcal); color: #fff; }
+
     .sheet-item-actions { display: flex; justify-content: space-between; align-items: center; }
     .sheet-add-item {
       font-size: 13px; color: var(--kcal); font-weight: 500; cursor: pointer;
