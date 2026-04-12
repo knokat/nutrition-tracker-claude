@@ -146,7 +146,7 @@ function TodayScreen({ user, targets, onSettings }) {
   async function handleSaveMeal(mealData) {
     if (!dayData) return;
     try {
-      const { _items, _scope, _originalRecipeName, ...mealFields } = mealData;
+      const { _items, _scope, _originalRecipeName, meal_items, ...mealFields } = mealData;
 
       if (_scope === 'all' && _originalRecipeName) {
         // Find all sibling meals with same recipe_name in this week
