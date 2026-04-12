@@ -317,6 +317,7 @@ export function EditMealSheet({ meal, slot, targets, onSave, onClose, siblingCou
   const [showDirectMacros, setShowDirectMacros] = useState(items.length === 0);
   const [undoStack, setUndoStack] = useState([]); // for undo deleted items
   const [per100Mode, setPer100Mode] = useState(null); // index of item in per-100g edit mode
+  const [macroInputMode, setMacroInputMode] = useState('per100'); // 'per100' or 'total'
 
   function recalcFromItems(updatedItems) {
     const totals = updatedItems.reduce((acc, it) => ({
@@ -404,6 +405,12 @@ export function EditMealSheet({ meal, slot, targets, onSave, onClose, siblingCou
     recalcFromItems(updated);
   }
 
+  function updateTotalMacro(idx, field, value) {
+    const updated = items.map((it, i) => i === idx ? { ...it, [field]: Number(value) || 0 } : it);
+    setItems(updated);
+    recalcFromItems(updated);
+  }
+
   const save = () => {
     onSave({
       ...(meal || {}),
@@ -453,25 +460,48 @@ export function EditMealSheet({ meal, slot, targets, onSave, onClose, siblingCou
                     <span class="sheet-item-unit">${it.unit || 'g'}</span>
                     <div class="sheet-item-remove" onclick=${() => removeItem(idx)}>×</div>
                   </div>
-                  <!-- Per 100g toggle -->
+                  <!-- Macro input toggle -->
                   <div class="sheet-per100-toggle" onclick=${() => setPer100Mode(per100Mode === idx ? null : idx)}>
-                    ${per100Mode === idx ? 'Makros pro 100g ▲' : 'Makros pro 100g ▼'}
+                    ${per100Mode === idx ? 'Makros eingeben ▲' : 'Makros eingeben ▼'}
                   </div>
                   ${per100Mode === idx && html`
-                    <div class="sheet-per100-row">
-                      <input type="number" class="sheet-per100-input" placeholder="kcal/100g"
-                        value=${it._per100?.kcal || ''}
-                        onInput=${e => updatePer100(idx, 'kcal', e.target.value)}/>
-                      <input type="number" class="sheet-per100-input" placeholder="P/100g"
-                        value=${it._per100?.protein || ''}
-                        onInput=${e => updatePer100(idx, 'protein', e.target.value)}/>
-                      <input type="number" class="sheet-per100-input" placeholder="C/100g"
-                        value=${it._per100?.carbs || ''}
-                        onInput=${e => updatePer100(idx, 'carbs', e.target.value)}/>
-                      <input type="number" class="sheet-per100-input" placeholder="F/100g"
-                        value=${it._per100?.fat || ''}
-                        onInput=${e => updatePer100(idx, 'fat', e.target.value)}/>
+                    <div class="sheet-macro-mode-picker">
+                      <div class="sheet-macro-mode-opt ${macroInputMode === 'per100' ? 'active' : ''}"
+                        onclick=${() => setMacroInputMode('per100')}>pro 100g</div>
+                      <div class="sheet-macro-mode-opt ${macroInputMode === 'total' ? 'active' : ''}"
+                        onclick=${() => setMacroInputMode('total')}>Gesamt</div>
                     </div>
+                    ${macroInputMode === 'per100' ? html`
+                      <div class="sheet-per100-row">
+                        <input type="number" class="sheet-per100-input" placeholder="kcal/100g"
+                          value=${it._per100?.kcal || ''}
+                          onInput=${e => updatePer100(idx, 'kcal', e.target.value)}/>
+                        <input type="number" class="sheet-per100-input" placeholder="P/100g"
+                          value=${it._per100?.protein || ''}
+                          onInput=${e => updatePer100(idx, 'protein', e.target.value)}/>
+                        <input type="number" class="sheet-per100-input" placeholder="C/100g"
+                          value=${it._per100?.carbs || ''}
+                          onInput=${e => updatePer100(idx, 'carbs', e.target.value)}/>
+                        <input type="number" class="sheet-per100-input" placeholder="F/100g"
+                          value=${it._per100?.fat || ''}
+                          onInput=${e => updatePer100(idx, 'fat', e.target.value)}/>
+                      </div>
+                    ` : html`
+                      <div class="sheet-per100-row">
+                        <input type="number" class="sheet-per100-input" placeholder="kcal"
+                          value=${it.kcal || ''}
+                          onInput=${e => updateTotalMacro(idx, 'kcal', e.target.value)}/>
+                        <input type="number" class="sheet-per100-input" placeholder="P"
+                          value=${it.protein || ''}
+                          onInput=${e => updateTotalMacro(idx, 'protein', e.target.value)}/>
+                        <input type="number" class="sheet-per100-input" placeholder="C"
+                          value=${it.carbs || ''}
+                          onInput=${e => updateTotalMacro(idx, 'carbs', e.target.value)}/>
+                        <input type="number" class="sheet-per100-input" placeholder="F"
+                          value=${it.fat || ''}
+                          onInput=${e => updateTotalMacro(idx, 'fat', e.target.value)}/>
+                      </div>
+                    `}
                   `}
                   <div class="sheet-item-macros-row">
                     <span class="sheet-item-macro-display">${n0(it.kcal)} kcal</span>
