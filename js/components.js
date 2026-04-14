@@ -177,7 +177,7 @@ export function MealCard({ slot, meal, onEdit, onDelete }) {
 
   return html`
     <div class="meal-card">
-      <div class="meal-card-header" onclick=${() => hasMeal && setOpen(!open)}>
+      <div class="meal-card-header" onclick=${() => hasMeal ? setOpen(!open) : onEdit && onEdit(meal, slot)}>
         <div class="meal-icon-wrap">
           <span class="meal-icon">${slot.icon}</span>
         </div>
@@ -195,7 +195,7 @@ export function MealCard({ slot, meal, onEdit, onDelete }) {
                       <span>C ${n0(meal.carbs)}</span>
                       <span class="macro-dot">·</span>
                       <span>F ${n0(meal.fat)}</span>`
-              : html`<span class="empty-meal">Noch nichts geplant</span>`
+              : html`<span class="empty-meal">+ Eintragen</span>`
             }
           </div>
         </div>
