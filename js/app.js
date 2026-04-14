@@ -174,14 +174,15 @@ function TodayScreen({ user, targets, onSettings }) {
         }
       } else {
         // Single day update
-        await upsertMeal({
+        const saved = await upsertMeal({
           ...mealFields,
           day_id: dayData.id,
           person: 'katja',
         });
 
-        if (_items && _items.length > 0 && mealFields.id) {
-          await replaceMealItems(mealFields.id, _items);
+        const mealId = mealFields.id || saved?.id;
+        if (_items && _items.length > 0 && mealId) {
+          await replaceMealItems(mealId, _items);
         }
       }
 
