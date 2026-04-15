@@ -252,6 +252,33 @@
       padding: 16px;
     }
 
+    /* ── Day Notes ── */
+    .day-notes {
+      margin-bottom: 16px;
+    }
+    .day-notes-input {
+      width: 100%;
+      min-height: 60px;
+      max-height: 120px;
+      padding: 10px 12px;
+      font-size: 13px;
+      font-family: inherit;
+      color: var(--text-1);
+      background: var(--card);
+      border: 1px solid var(--border-2);
+      border-radius: 10px;
+      resize: none;
+      overflow-y: auto;
+      line-height: 1.4;
+    }
+    .day-notes-input::placeholder {
+      color: var(--text-3);
+    }
+    .day-notes-input:focus {
+      outline: none;
+      border-color: var(--kcal);
+    }
+
     /* ── Segmented Picker ── */
     .seg-picker {
       display: flex;
@@ -635,6 +662,13 @@
     .mp-standard-row + .mp-standard-row { border-top: 0.5px solid var(--border-2); }
     .mp-standard-name { color: var(--text-2); }
     .mp-standard-kcal { color: var(--text-3); font-variant-numeric: tabular-nums; font-size: 12px; }
+
+    /* ── Mealplan Empty State ── */
+    .mp-empty-state { text-align: center; padding: 48px 24px; }
+    .mp-empty-icon { font-size: 40px; margin-bottom: 12px; }
+    .mp-empty-text { font-size: 15px; font-weight: 500; color: var(--text-1); margin-bottom: 6px; }
+    .mp-empty-hint { font-size: 13px; color: var(--text-2); }
+    .mp-recipe-desc-preview { font-size: 11px; color: var(--text-2); margin-top: 2px; font-style: italic; }
 
     /* ── Mealplan Tab Bar & Detail Sections ── */
     .mp-recipe-desc { font-size: 12px; color: var(--text-2); padding: 0 12px 8px; font-style: italic; }
