@@ -1,1079 +1,337 @@
-// js/app.js — Main App Component
-import { html, render, useState, useEffect, useRef } from 'https://unpkg.com/htm/preact/standalone.module.js';
-import {
-  today, getWeekStart, getWeekDates, addDays, formatDateDisplay, formatDateFull,
-  isToday, isFuture, getKW, weekdayShort, defaultDayType,
-  getSlotsForType, sumMacros, macroPercent, n0,
-  MACRO_COLORS, DAYTYPE_COLORS, DAYTYPE_LABELS,
-} from './helpers.js';
-import {
-  supabase, signIn, signOut, getUser, onAuthChange,
-  getOrCreateWeek, getDaysForWeek, getOrCreateDay,
-  getMealsForDay, updateDayType, updateDayTotals, updateDayNotes,
-  upsertMeal, deleteMeal, getDayTypeTargets, importWeekData,
-  findSiblingMeals, updateMealMacros, replaceMealItems, recalcDayTotals,
-  getRecipesForWeek,
-} from './db.js';
-import {
-  Icons, WeekStrip, MacroBars, SegmentedPicker,
-  MealCard, BottomNav, LoginScreen, EditMealSheet,
-} from './components.js';
+// js/db.js — Supabase Client & DB Functions
+// ⚠️ SUPABASE_URL und SUPABASE_ANON_KEY müssen nach Projekt-Setup eingetragen werden!
 
-// ── Day Type Picker Options ──
-const DAYTYPE_OPTIONS = [
-  { value: 'workout', label: 'Workout' },
-  { value: 'rest',    label: 'Rest Day' },
-  { value: 'friday',  label: 'Friday' },
-];
+import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
 
-// ── Today Screen ──
+const SUPABASE_URL = 'https://qxbnjemssqjczexevnff.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InF4Ym5qZW1zc3FqY3pleGV2bmZmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU4MjUyMDYsImV4cCI6MjA5MTQwMTIwNn0.dZLv-Cgar7FaSSbyZBFcWq1JGQrp-v8UQ-CNjN3Fm2Y';
 
-function TodayScreen({ user, targets, onSettings }) {
-  const [selectedDate, setSelectedDate] = useState(today());
-  const [weekStart, setWeekStart] = useState(getWeekStart(today()));
-  const [weekDates, setWeekDates] = useState(getWeekDates(getWeekStart(today())));
-  const [daysData, setDaysData] = useState([]);
-  const [dayData, setDayData] = useState(null);
-  const [meals, setMeals] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [editMeal, setEditMeal] = useState(null); // { meal, slot }
-  const [notes, setNotes] = useState('');
-  const notesTimer = useRef(null);
+export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-  // Load week data
-  useEffect(() => {
-    loadWeek(weekStart);
-  }, [weekStart, user]);
+// ── Auth ──
 
-  // Load day data when selected date changes
-  useEffect(() => {
-    if (daysData.length > 0) {
-      loadDay(selectedDate);
+export async function signIn(email, password) {
+  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+  if (error) throw error;
+  return data;
+}
+
+export async function signUp(email, password) {
+  const { data, error } = await supabase.auth.signUp({ email, password });
+  if (error) throw error;
+  return data;
+}
+
+export async function signOut() {
+  await supabase.auth.signOut();
+}
+
+export async function getUser() {
+  const { data: { user } } = await supabase.auth.getUser();
+  return user;
+}
+
+export function onAuthChange(cb) {
+  return supabase.auth.onAuthStateChange((_event, session) => cb(session?.user || null));
+}
+
+// ── Weeks ──
+
+export async function getOrCreateWeek(userId, startDate) {
+  // Try to find existing week
+  let { data, error } = await supabase
+    .from('weeks')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('start_date', startDate)
+    .maybeSingle();
+
+  if (error) throw error;
+
+  if (!data) {
+    // Not found — create
+    const { data: created, error: cErr } = await supabase
+      .from('weeks')
+      .insert({ user_id: userId, start_date: startDate })
+      .select()
+      .single();
+    if (cErr) throw cErr;
+    return created;
+  }
+  return data;
+}
+
+// ── Days ──
+
+export async function getDaysForWeek(weekId) {
+  const { data, error } = await supabase
+    .from('days')
+    .select('*')
+    .eq('week_id', weekId)
+    .order('date', { ascending: true });
+  if (error) throw error;
+  return data || [];
+}
+
+export async function getOrCreateDay(weekId, date, dayType) {
+  let { data, error } = await supabase
+    .from('days')
+    .select('*')
+    .eq('week_id', weekId)
+    .eq('date', date)
+    .maybeSingle();
+
+  if (error) throw error;
+
+  if (!data) {
+    const { data: created, error: cErr } = await supabase
+      .from('days')
+      .insert({
+        week_id: weekId,
+        date,
+        day_type: dayType,
+        day_type_default: dayType,
+        total_kcal: 0, total_protein: 0, total_carbs: 0, total_fat: 0
+      })
+      .select()
+      .single();
+    if (cErr) throw cErr;
+    return created;
+  }
+  return data;
+}
+
+export async function updateDayType(dayId, newType) {
+  const { error } = await supabase
+    .from('days')
+    .update({ day_type: newType })
+    .eq('id', dayId);
+  if (error) throw error;
+}
+
+export async function updateDayTotals(dayId, totals) {
+  const { error } = await supabase
+    .from('days')
+    .update(totals)
+    .eq('id', dayId);
+  if (error) throw error;
+}
+
+export async function updateDayNotes(dayId, notes) {
+  const { error } = await supabase
+    .from('days')
+    .update({ notes })
+    .eq('id', dayId);
+  if (error) throw error;
+}
+
+// ── Meals ──
+
+export async function getMealsForDay(dayId) {
+  const { data, error } = await supabase
+    .from('meals')
+    .select('*, meal_items(*)')
+    .eq('day_id', dayId)
+    .order('slot');
+  if (error) throw error;
+  return data || [];
+}
+
+export async function upsertMeal(meal) {
+  const { data, error } = await supabase
+    .from('meals')
+    .upsert(meal)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+export async function deleteMeal(mealId) {
+  // meal_items cascade-deleted via FK
+  const { error } = await supabase
+    .from('meals')
+    .delete()
+    .eq('id', mealId);
+  if (error) throw error;
+}
+
+// ── Meal Items ──
+
+export async function upsertMealItems(items) {
+  const { error } = await supabase
+    .from('meal_items')
+    .upsert(items);
+  if (error) throw error;
+}
+
+export async function deleteMealItem(itemId) {
+  const { error } = await supabase
+    .from('meal_items')
+    .delete()
+    .eq('id', itemId);
+  if (error) throw error;
+}
+
+// ── Bulk update: all meals with same recipe_name in a week ──
+
+export async function findSiblingMeals(weekId, recipeName, slot) {
+  // Find all meals in this week with the same recipe_name and slot
+  const { data: days, error: dErr } = await supabase
+    .from('days')
+    .select('id')
+    .eq('week_id', weekId);
+  if (dErr) throw dErr;
+  if (!days || days.length === 0) return [];
+
+  const dayIds = days.map(d => d.id);
+  const { data: meals, error: mErr } = await supabase
+    .from('meals')
+    .select('*, meal_items(*)')
+    .in('day_id', dayIds)
+    .eq('recipe_name', recipeName)
+    .eq('slot', slot);
+  if (mErr) throw mErr;
+  return meals || [];
+}
+
+export async function updateMealMacros(mealId, updates) {
+  const { error } = await supabase
+    .from('meals')
+    .update(updates)
+    .eq('id', mealId);
+  if (error) throw error;
+}
+
+export async function replaceMealItems(mealId, newItems) {
+  // Delete old items
+  const { error: delErr } = await supabase
+    .from('meal_items')
+    .delete()
+    .eq('meal_id', mealId);
+  if (delErr) throw delErr;
+
+  // Insert new items (strip old id/meal_id so Supabase generates fresh UUIDs)
+  if (newItems && newItems.length > 0) {
+    const { error: insErr } = await supabase
+      .from('meal_items')
+      .insert(newItems.map(it => {
+        const { id, meal_id, ...rest } = it;
+        return { ...rest, meal_id: mealId };
+      }));
+    if (insErr) throw insErr;
+  }
+}
+
+export async function recalcDayTotals(dayId) {
+  const meals = await getMealsForDay(dayId);
+  const totals = meals.reduce((acc, m) => ({
+    total_kcal: acc.total_kcal + (m.kcal || 0),
+    total_protein: acc.total_protein + (m.protein || 0),
+    total_carbs: acc.total_carbs + (m.carbs || 0),
+    total_fat: acc.total_fat + (m.fat || 0),
+  }), { total_kcal: 0, total_protein: 0, total_carbs: 0, total_fat: 0 });
+  await updateDayTotals(dayId, totals);
+  return totals;
+}
+
+// ── Day Type Targets ──
+
+export async function getDayTypeTargets() {
+  const { data, error } = await supabase
+    .from('day_type_targets')
+    .select('*');
+  if (error) throw error;
+  return data || [];
+}
+
+// ── Products ──
+
+export async function searchProducts(query) {
+  const { data, error } = await supabase
+    .from('products')
+    .select('*')
+    .ilike('name', `%${query}%`)
+    .limit(20);
+  if (error) throw error;
+  return data || [];
+}
+
+export async function upsertProduct(product) {
+  const { data, error } = await supabase
+    .from('products')
+    .upsert(product)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+// ── Recipes ──
+
+export async function getRecipesForWeek(weekId) {
+  const { data, error } = await supabase
+    .from('recipes')
+    .select('*')
+    .eq('week_id', weekId);
+  if (error) throw error;
+  return data || [];
+}
+
+// ── Import (Mealplan JSON) ──
+
+export async function importWeekData(userId, weekData) {
+  // weekData: { start_date, days: [...], recipes: [...] }
+  const week = await getOrCreateWeek(userId, weekData.start_date);
+
+  for (const dayData of weekData.days) {
+    const day = await getOrCreateDay(week.id, dayData.date, dayData.day_type);
+
+    // Clear existing meals for this day
+    const existing = await getMealsForDay(day.id);
+    for (const m of existing) {
+      await deleteMeal(m.id);
     }
-  }, [selectedDate, daysData]);
 
-  async function loadWeek(start) {
-    setLoading(true);
-    try {
-      const week = await getOrCreateWeek(user.id, start);
-      console.log('loadWeek: week=', week);
-      const days = await getDaysForWeek(week.id);
-      console.log('loadWeek: days from DB=', days.map(d => ({ date: d.date, kcal: d.total_kcal, id: d.id })));
+    // Insert new meals
+    for (const mealData of (dayData.meals || [])) {
+      const { items, ...mealFields } = mealData;
+      const meal = await upsertMeal({ ...mealFields, day_id: day.id });
 
-      // Ensure all 7 days exist
-      const dates = getWeekDates(start);
-      console.log('loadWeek: expected dates=', dates);
-      const allDays = [];
-      for (const d of dates) {
-        // Compare only first 10 chars (YYYY-MM-DD) in case DB returns datetime
-        let existing = days.find(dy => String(dy.date).slice(0, 10) === d);
-        if (!existing) {
-          console.log('loadWeek: creating missing day for', d);
-          existing = await getOrCreateDay(week.id, d, defaultDayType(d));
-        }
-        allDays.push(existing);
+      if (items && items.length > 0) {
+        await upsertMealItems(items.map(it => ({ ...it, meal_id: meal.id })));
       }
-      setDaysData(allDays);
-    } catch (e) {
-      console.error('loadWeek error:', e);
     }
-    setLoading(false);
+
+    // Update totals
+    const totals = (dayData.meals || []).reduce((acc, m) => ({
+      total_kcal: acc.total_kcal + (m.kcal || 0),
+      total_protein: acc.total_protein + (m.protein || 0),
+      total_carbs: acc.total_carbs + (m.carbs || 0),
+      total_fat: acc.total_fat + (m.fat || 0),
+    }), { total_kcal: 0, total_protein: 0, total_carbs: 0, total_fat: 0 });
+
+    await updateDayTotals(day.id, totals);
   }
 
-  async function loadDay(dateStr) {
-    const day = daysData.find(d => String(d.date).slice(0, 10) === dateStr);
-    if (!day) return;
-    setDayData(day);
-    setNotes(day.notes || '');
-    try {
-      const m = await getMealsForDay(day.id);
-      console.log('loadDay:', dateStr, 'meals=', m.length, m.map(x => x.recipe_name));
-      setMeals(m);
-    } catch (e) {
-      console.error('loadDay error:', e);
-      setMeals([]);
-    }
-  }
+  // Import recipes (servings, total_items, steps)
+  if (weekData.recipes && weekData.recipes.length > 0) {
+    // Clear existing recipes for this week
+    await supabase.from('recipes').delete().eq('week_id', week.id);
 
-  function selectDate(dateStr) {
-    setSelectedDate(dateStr);
-    const newStart = getWeekStart(dateStr);
-    if (newStart !== weekStart) {
-      setWeekStart(newStart);
-      setWeekDates(getWeekDates(newStart));
-    }
-  }
-
-  function shiftWeek(dir) {
-    const newStart = addDays(weekStart, dir * 7);
-    setWeekStart(newStart);
-    setWeekDates(getWeekDates(newStart));
-    setSelectedDate(dir > 0 ? newStart : addDays(newStart, 6));
-  }
-
-  async function changeDayType(newType) {
-    if (!dayData) return;
-    try {
-      await updateDayType(dayData.id, newType);
-      setDayData({ ...dayData, day_type: newType });
-      // Refresh week data
-      const updated = daysData.map(d => d.id === dayData.id ? { ...d, day_type: newType } : d);
-      setDaysData(updated);
-    } catch (e) {
-      console.error('changeDayType error:', e);
-    }
-  }
-
-  function handleNotesChange(value) {
-    setNotes(value);
-    if (notesTimer.current) clearTimeout(notesTimer.current);
-    notesTimer.current = setTimeout(async () => {
-      if (!dayData) return;
-      try {
-        await updateDayNotes(dayData.id, value);
-        setDayData(prev => ({ ...prev, notes: value }));
-        setDaysData(prev => prev.map(d => d.id === dayData.id ? { ...d, notes: value } : d));
-      } catch (e) {
-        console.error('saveNotes error:', e);
-      }
-    }, 800);
-  }
-
-  async function handleDeleteMeal(mealToDelete) {
-    if (!dayData || !mealToDelete?.id) return;
-    if (!confirm(`"${mealToDelete.recipe_name}" für heute löschen?`)) return;
-    try {
-      await deleteMeal(mealToDelete.id);
-      const m = await getMealsForDay(dayData.id);
-      setMeals(m);
-      const totals = sumMacros(m);
-      await updateDayTotals(dayData.id, {
-        total_kcal: totals.kcal,
-        total_protein: totals.protein,
-        total_carbs: totals.carbs,
-        total_fat: totals.fat,
+    for (const r of weekData.recipes) {
+      await supabase.from('recipes').insert({
+        week_id: week.id,
+        name: r.name,
+        description: r.description || null,
+        is_meal_prep: r.is_meal_prep || false,
+        meal_type: r.meal_type || null,
+        servings: r.servings || [],
+        total_items: r.total_items || [],
+        steps: r.steps || [],
       });
-      const updatedDay = { ...dayData, total_kcal: totals.kcal, total_protein: totals.protein, total_carbs: totals.carbs, total_fat: totals.fat };
-      setDayData(updatedDay);
-      setDaysData(daysData.map(d => d.id === dayData.id ? updatedDay : d));
-    } catch (e) {
-      console.error('deleteMeal error:', e);
     }
   }
 
-  async function handleSaveMeal(mealData) {
-    if (!dayData) return;
-    try {
-      const { _items, _scope, _originalRecipeName, meal_items, ...mealFields } = mealData;
-
-      if (_scope === 'all' && _originalRecipeName) {
-        // Find all sibling meals with same recipe_name in this week
-        const week = await getOrCreateWeek(user.id, weekStart);
-        const siblings = await findSiblingMeals(week.id, _originalRecipeName, mealFields.slot);
-        const affectedDayIds = new Set();
-
-        for (const sib of siblings) {
-          await updateMealMacros(sib.id, {
-            recipe_name: mealFields.recipe_name,
-            kcal: mealFields.kcal,
-            protein: mealFields.protein,
-            carbs: mealFields.carbs,
-            fat: mealFields.fat,
-          });
-          if (_items && _items.length > 0) {
-            await replaceMealItems(sib.id, _items);
-          }
-          affectedDayIds.add(sib.day_id);
-        }
-
-        // Recalc totals for all affected days
-        for (const dayId of affectedDayIds) {
-          await recalcDayTotals(dayId);
-        }
-      } else {
-        // Single day update
-        const saved = await upsertMeal({
-          ...mealFields,
-          day_id: dayData.id,
-          person: 'katja',
-        });
-
-        const mealId = mealFields.id || saved?.id;
-        if (_items && _items.length > 0 && mealId) {
-          await replaceMealItems(mealId, _items);
-        }
-      }
-
-      // Reload current day meals
-      const m = await getMealsForDay(dayData.id);
-      setMeals(m);
-
-      // Recalc and update current day totals
-      const totals = sumMacros(m);
-      await updateDayTotals(dayData.id, {
-        total_kcal: totals.kcal,
-        total_protein: totals.protein,
-        total_carbs: totals.carbs,
-        total_fat: totals.fat,
-      });
-      const updatedDay = {
-        ...dayData,
-        total_kcal: totals.kcal,
-        total_protein: totals.protein,
-        total_carbs: totals.carbs,
-        total_fat: totals.fat,
-      };
-      setDayData(updatedDay);
-
-      // Reload all week days to refresh rings
-      if (_scope === 'all') {
-        await loadWeek(weekStart);
-      } else {
-        setDaysData(daysData.map(d => d.id === dayData.id ? updatedDay : d));
-      }
-
-      setEditMeal(null);
-    } catch (e) {
-      console.error('saveMeal error:', e);
-    }
-  }
-
-  // Count sibling meals for scope toggle
-  const [siblingCount, setSiblingCount] = useState(0);
-  useEffect(() => {
-    if (editMeal?.meal?.recipe_name && !editMeal?.meal?.is_standard) {
-      getOrCreateWeek(user.id, weekStart).then(week =>
-        findSiblingMeals(week.id, editMeal.meal.recipe_name, editMeal.meal.slot)
-      ).then(siblings => setSiblingCount(siblings.length)).catch(() => setSiblingCount(0));
-    } else {
-      setSiblingCount(0);
-    }
-  }, [editMeal]);
-
-  const dayType = dayData?.day_type || 'rest';
-  const slots = getSlotsForType(dayType);
-  const dayTargets = targets ? targets.find(t => t.day_type === dayType) : null;
-  const actual = dayData ? {
-    kcal: dayData.total_kcal || 0,
-    protein: dayData.total_protein || 0,
-    carbs: dayData.total_carbs || 0,
-    fat: dayData.total_fat || 0,
-  } : { kcal: 0, protein: 0, carbs: 0, fat: 0 };
-
-  const isSelectedToday = isToday(selectedDate);
-  const headerTitle = isSelectedToday ? 'Heute' : weekdayShort(selectedDate).replace('.', '');
-  const headerDate = formatDateDisplay(selectedDate);
-
-  return html`
-    <div class="screen today-screen">
-      <!-- Sticky Header -->
-      <div class="sticky-header">
-        <div class="header-top">
-          <div class="header-title-group">
-            <h1 class="header-title">${headerTitle}</h1>
-            <span class="header-date">${headerDate}</span>
-          </div>
-          <div class="header-actions">
-            <div class="header-nav-arrows">
-              <div class="nav-arrow" onclick=${() => shiftWeek(-1)}>${Icons.chevLeft}</div>
-              <span class="kw-label">KW ${getKW(selectedDate)}</span>
-              <div class="nav-arrow" onclick=${() => shiftWeek(1)}>${Icons.chevRight}</div>
-            </div>
-            <div class="nav-arrow settings-gear" onclick=${onSettings}>${Icons.settings}</div>
-          </div>
-        </div>
-
-        <${WeekStrip}
-          dates=${weekDates}
-          daysData=${daysData}
-          selectedDate=${selectedDate}
-          onSelect=${selectDate}
-          targets=${targets ? Object.fromEntries(targets.map(t => [t.day_type, t])) : null}
-        />
-
-        <${MacroBars} actual=${actual} targets=${dayTargets}/>
-      </div>
-
-      <!-- Body -->
-      <div class="screen-body">
-        <${SegmentedPicker}
-          value=${dayType}
-          options=${DAYTYPE_OPTIONS}
-          onChange=${changeDayType}
-        />
-
-        <!-- Notes -->
-        <div class="day-notes">
-          <textarea
-            class="day-notes-input"
-            placeholder="Notizen zum Tag..."
-            value=${notes}
-            onInput=${e => handleNotesChange(e.target.value)}
-            rows="3"
-          />
-        </div>
-
-        <div class="meals-list">
-          ${loading
-            ? html`<div class="loading-state">Laden...</div>`
-            : slots.map(slot => {
-                const meal = meals.find(m => m.slot === slot.key);
-                return html`<${MealCard}
-                  key=${slot.key}
-                  slot=${slot}
-                  meal=${meal}
-                  onEdit=${(m, s) => setEditMeal({ meal: m, slot: s })}
-                  onDelete=${meal ? (m) => handleDeleteMeal(m) : null}
-                />`;
-              })
-          }
-        </div>
-
-        <!-- Day Total -->
-        ${!loading && meals.length > 0 && html`
-          <div class="day-total">
-            <span class="day-total-label">Gesamt</span>
-            <div class="day-total-macros">
-              <span style="color:${MACRO_COLORS.kcal}">${n0(actual.kcal)} kcal</span>
-              <span style="color:${MACRO_COLORS.protein}">P ${n0(actual.protein)}</span>
-              <span style="color:${MACRO_COLORS.carbs}">C ${n0(actual.carbs)}</span>
-              <span style="color:${MACRO_COLORS.fat}">F ${n0(actual.fat)}</span>
-            </div>
-          </div>
-        `}
-      </div>
-
-      <!-- Edit Sheet -->
-      ${editMeal && html`
-        <${EditMealSheet}
-          meal=${editMeal.meal}
-          slot=${editMeal.slot}
-          targets=${dayTargets}
-          siblingCount=${siblingCount}
-          onSave=${handleSaveMeal}
-          onClose=${() => setEditMeal(null)}
-        />
-      `}
-    </div>
-  `;
+  return week;
 }
-
-// ── Week Screen ──
-
-function WeekScreen({ user, targets }) {
-  const [weekStart, setWeekStart] = useState(getWeekStart(today()));
-  const [weekDates, setWeekDates] = useState(getWeekDates(getWeekStart(today())));
-  const [daysData, setDaysData] = useState([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => { loadWeekData(weekStart); }, [weekStart, user]);
-
-  async function loadWeekData(start) {
-    setLoading(true);
-    try {
-      const week = await getOrCreateWeek(user.id, start);
-      const days = await getDaysForWeek(week.id);
-      const dates = getWeekDates(start);
-      const allDays = [];
-      for (const d of dates) {
-        let existing = days.find(dy => String(dy.date).slice(0, 10) === d);
-        if (!existing) {
-          existing = await getOrCreateDay(week.id, d, defaultDayType(d));
-        }
-        allDays.push(existing);
-      }
-      setDaysData(allDays);
-    } catch (e) { console.error('WeekScreen loadWeek error:', e); }
-    setLoading(false);
-  }
-
-  function shiftWeek(dir) {
-    const s = addDays(weekStart, dir * 7);
-    setWeekStart(s);
-    setWeekDates(getWeekDates(s));
-  }
-
-  // Calculate totals
-  const targetsMap = targets ? Object.fromEntries(targets.map(t => [t.day_type, t])) : {};
-  const daysWithTargets = daysData.map(d => {
-    const t = targetsMap[d.day_type] || { target_kcal: 2200, target_protein: 140, target_carbs: 253, target_fat: 70 };
-    return { ...d, targets: t };
-  });
-
-  const filledDays = daysWithTargets.filter(d => d.total_kcal > 0);
-  const numFilled = filledDays.length || 1;
-
-  const totalActual = { kcal: 0, protein: 0, carbs: 0, fat: 0 };
-  const totalTarget = { kcal: 0, protein: 0, carbs: 0, fat: 0 };
-  daysWithTargets.forEach(d => {
-    totalActual.kcal += d.total_kcal || 0;
-    totalActual.protein += d.total_protein || 0;
-    totalActual.carbs += d.total_carbs || 0;
-    totalActual.fat += d.total_fat || 0;
-    totalTarget.kcal += d.targets.target_kcal;
-    totalTarget.protein += d.targets.target_protein;
-    totalTarget.carbs += d.targets.target_carbs;
-    totalTarget.fat += d.targets.target_fat;
-  });
-
-  const avgActual = {
-    kcal: Math.round(totalActual.kcal / numFilled),
-    protein: Math.round(totalActual.protein / numFilled),
-    carbs: Math.round(totalActual.carbs / numFilled),
-    fat: Math.round(totalActual.fat / numFilled),
-  };
-  const avgTarget = {
-    kcal: Math.round(totalTarget.kcal / 7),
-    protein: Math.round(totalTarget.protein / 7),
-    carbs: Math.round(totalTarget.carbs / 7),
-    fat: Math.round(totalTarget.fat / 7),
-  };
-
-  const maxKcal = Math.max(
-    ...daysWithTargets.map(d => Math.max(d.total_kcal || 0, d.targets.target_kcal)),
-    1
-  );
-
-  const dateRange = `${formatDateDisplay(weekDates[0])} – ${formatDateDisplay(weekDates[6])}`;
-
-  return html`
-    <div class="screen">
-      <div class="week-screen">
-        <!-- Header -->
-        <div class="week-header">
-          <div class="week-header-top">
-            <h1 class="header-title">Woche</h1>
-            <span class="header-date">KW ${getKW(weekDates[3])}</span>
-          </div>
-          <div class="week-nav">
-            <div class="nav-arrow" onclick=${() => shiftWeek(-1)}>${Icons.chevLeft}</div>
-            <span class="week-range">${dateRange}</span>
-            <div class="nav-arrow" onclick=${() => shiftWeek(1)}>${Icons.chevRight}</div>
-          </div>
-        </div>
-
-        ${loading ? html`<div class="loading-state">Laden...</div>` : html`
-          <!-- Summary Cards -->
-          <div class="week-summary">
-            ${[
-              { key: 'kcal', label: 'KCAL', color: MACRO_COLORS.kcal, actual: totalActual.kcal, target: totalTarget.kcal, avg: avgActual.kcal, avgT: avgTarget.kcal },
-              { key: 'protein', label: 'PROT', color: MACRO_COLORS.protein, actual: totalActual.protein, target: totalTarget.protein, avg: avgActual.protein, avgT: avgTarget.protein },
-              { key: 'carbs', label: 'CARB', color: MACRO_COLORS.carbs, actual: totalActual.carbs, target: totalTarget.carbs, avg: avgActual.carbs, avgT: avgTarget.carbs },
-              { key: 'fat', label: 'FETT', color: MACRO_COLORS.fat, actual: totalActual.fat, target: totalTarget.fat, avg: avgActual.fat, avgT: avgTarget.fat },
-            ].map(m => {
-              const pct = Math.min(Math.round((m.actual / (m.target || 1)) * 100), 100);
-              return html`
-                <div class="summary-card">
-                  <div class="summary-label" style="color:${m.color}">${m.label}</div>
-                  <div class="summary-values">
-                    <span class="summary-actual">${n0(m.actual)}</span>
-                    <span class="summary-target">/ ${n0(m.target)}</span>
-                  </div>
-                  <div class="summary-bar-track">
-                    <div class="summary-bar-fill" style="width:${pct}%;background:${m.color}"/>
-                  </div>
-                  <div class="summary-avg">⌀ ${n0(m.avg)} / Tag (Ziel: ${n0(m.avgT)})</div>
-                </div>
-              `;
-            })}
-          </div>
-
-          <!-- Daily Bars -->
-          <div class="week-daily">
-            <div class="week-daily-title">Kalorien pro Tag</div>
-            ${daysWithTargets.map(d => {
-              const date = String(d.date).slice(0, 10);
-              const kcal = d.total_kcal || 0;
-              const target = d.targets.target_kcal;
-              const barW = Math.round((kcal / maxKcal) * 100);
-              const targetW = Math.round((target / maxKcal) * 100);
-              const dtColor = DAYTYPE_COLORS[d.day_type] || '#999';
-              const isTodayDate = isToday(date);
-              const barColor = kcal > target * 1.1 ? '#A42059' : kcal > target ? '#623c6d' : MACRO_COLORS.kcal;
-
-              return html`
-                <div class="daily-row ${isTodayDate ? 'today-row' : ''}">
-                  <div class="daily-label">
-                    <div class="dt-dot" style="background:${dtColor}"/>
-                    <span class="daily-day">${weekdayShort(date)}</span>
-                  </div>
-                  <div class="daily-bar-container">
-                    <div class="daily-bar-track">
-                      <div class="daily-bar-fill" style="width:${barW}%;background:${barColor}"/>
-                      <div class="daily-target-line" style="left:${targetW}%"/>
-                    </div>
-                    <span class="daily-kcal">${kcal > 0 ? n0(kcal) : '–'}</span>
-                  </div>
-                </div>
-              `;
-            })}
-
-            <!-- Legend -->
-            <div class="week-legend">
-              <span class="legend-item"><span class="dt-dot" style="background:${DAYTYPE_COLORS.workout}"/>Workout</span>
-              <span class="legend-item"><span class="dt-dot" style="background:${DAYTYPE_COLORS.rest}"/>Rest Day</span>
-              <span class="legend-item"><span class="dt-dot" style="background:${DAYTYPE_COLORS.friday}"/>Friday</span>
-              <span class="legend-item"><span class="target-line-legend"/>Ziel</span>
-            </div>
-          </div>
-        `}
-      </div>
-    </div>
-  `;
-}
-
-// ── Mealplan Screen ──
-
-function MealplanScreen({ user }) {
-  const [weekStart, setWeekStart] = useState(getWeekStart(today()));
-  const [weekDates, setWeekDates] = useState(getWeekDates(getWeekStart(today())));
-  const [recipeDetails, setRecipeDetails] = useState([]); // from recipes table (static snapshot)
-  const [loading, setLoading] = useState(true);
-  const [openRecipe, setOpenRecipe] = useState(null); // recipe_name
-  const [openSection, setOpenSection] = useState('servings'); // 'servings' | 'ingredients' | 'steps'
-
-  useEffect(() => { loadMealplan(weekStart); }, [weekStart, user]);
-
-  async function loadMealplan(start) {
-    setLoading(true);
-    try {
-      const week = await getOrCreateWeek(user.id, start);
-      // Only load recipe snapshots — NOT live meals
-      const recs = await getRecipesForWeek(week.id);
-      setRecipeDetails(recs);
-    } catch (e) { console.error('MealplanScreen error:', e); }
-    setLoading(false);
-  }
-
-  function shiftWeek(dir) {
-    const s = addDays(weekStart, dir * 7);
-    setWeekStart(s);
-    setWeekDates(getWeekDates(s));
-  }
-
-  // Build data purely from recipes (static snapshot from import)
-  const variableRecipes = recipeDetails.filter(r => !r.is_meal_prep || r.is_meal_prep);
-  // actually: all recipes are "variable" in the recipes table — standard meals are not stored there
-
-  // Build overview from recipe servings data
-  const mealsByPeriod = { moDo: {}, fr: {}, saSo: {} };
-  recipeDetails.forEach(r => {
-    const slot = r.meal_type || 'lunch';
-    const slotIcon = slot === 'breakfast' ? '🥣' : '🍽️';
-    // Check which periods this recipe covers from servings
-    const katjaServings = (r.servings || []).find(s => s.person === 'katja');
-    if (katjaServings) {
-      const days = katjaServings.days || [];
-      const hasMoDo = days.some(d => ['Mo', 'Di', 'Mi', 'Do'].includes(d));
-      const hasFr = days.some(d => d === 'Fr');
-      const hasSaSo = days.some(d => ['Sa', 'So'].includes(d));
-      if (hasMoDo) mealsByPeriod.moDo[slot] = r.name;
-      if (hasFr) mealsByPeriod.fr[slot] = r.name;
-      if (hasSaSo) mealsByPeriod.saSo[slot] = r.name;
-    }
-  });
-
-  // Person labels
-  const personLabels = { katja: 'Katja', leander: 'Leander', matthias: 'Matthias' };
-  const personColors = { katja: '#0C447C', leander: '#085041', matthias: '#5C3D1A' };
-
-  const dateRange = `${formatDateDisplay(weekDates[0])} – ${formatDateDisplay(weekDates[6])}`;
-
-  return html`
-    <div class="screen">
-      <div class="mealplan-screen">
-        <!-- Header -->
-        <div class="week-header">
-          <div class="week-header-top">
-            <h1 class="header-title">Mealplan</h1>
-            <span class="header-date">KW ${getKW(weekDates[3])}</span>
-          </div>
-          <div class="week-nav">
-            <div class="nav-arrow" onclick=${() => shiftWeek(-1)}>${Icons.chevLeft}</div>
-            <span class="week-range">${dateRange}</span>
-            <div class="nav-arrow" onclick=${() => shiftWeek(1)}>${Icons.chevRight}</div>
-          </div>
-        </div>
-
-        ${loading ? html`<div class="loading-state">Laden...</div>` : html`
-          ${recipeDetails.length === 0 ? html`
-            <div class="mp-empty-state">
-              <div class="mp-empty-icon">📋</div>
-              <div class="mp-empty-text">Kein Mealplan für diese Woche importiert.</div>
-              <div class="mp-empty-hint">Importiere einen Mealplan unter Einstellungen.</div>
-            </div>
-          ` : html`
-            <!-- Overview Card -->
-            <div class="mp-overview-card">
-              <div class="mp-overview-title">Wochenübersicht</div>
-              ${mealsByPeriod.moDo.breakfast || mealsByPeriod.moDo.lunch ? html`
-                <div class="mp-period">
-                  <span class="mp-period-label">Mo–Do</span>
-                  <div class="mp-period-meals">
-                    ${mealsByPeriod.moDo.breakfast ? html`<div class="mp-period-meal">🥣 ${mealsByPeriod.moDo.breakfast}</div>` : ''}
-                    ${mealsByPeriod.moDo.lunch ? html`<div class="mp-period-meal">🍽️ ${mealsByPeriod.moDo.lunch}</div>` : ''}
-                  </div>
-                </div>
-              ` : ''}
-              ${mealsByPeriod.fr.breakfast || mealsByPeriod.fr.lunch ? html`
-                <div class="mp-period">
-                  <span class="mp-period-label">Freitag</span>
-                  <div class="mp-period-meals">
-                    ${mealsByPeriod.fr.breakfast ? html`<div class="mp-period-meal">🥣 ${mealsByPeriod.fr.breakfast}</div>` : ''}
-                    <div class="mp-period-meal">🍅 Caprese</div>
-                    <div class="mp-period-meal">🎬 Movie Night</div>
-                  </div>
-                </div>
-              ` : ''}
-              ${mealsByPeriod.saSo.breakfast || mealsByPeriod.saSo.lunch ? html`
-                <div class="mp-period">
-                  <span class="mp-period-label">Sa + So</span>
-                  <div class="mp-period-meals">
-                    ${mealsByPeriod.saSo.breakfast ? html`<div class="mp-period-meal">🥣 ${mealsByPeriod.saSo.breakfast}</div>` : ''}
-                    ${mealsByPeriod.saSo.lunch ? html`<div class="mp-period-meal">🍽️ ${mealsByPeriod.saSo.lunch}</div>` : ''}
-                  </div>
-                </div>
-              ` : ''}
-            </div>
-
-            <!-- Recipe Cards -->
-            <div class="mp-section-title">Rezepte (${recipeDetails.length})</div>
-            <div class="mp-recipes">
-              ${recipeDetails.map(r => {
-                const isOpen = openRecipe === r.name;
-                const hasDetail = (r.servings?.length > 0 || r.total_items?.length > 0 || r.steps?.length > 0);
-                const isMealPrep = r.is_meal_prep;
-
-                // Build days string from servings
-                const allDays = (r.servings || []).flatMap(s => s.days || []);
-                const uniqueDays = [...new Set(allDays)];
-                const daysStr = uniqueDays.join(', ');
-
-                // Calculate per-portion macros from total_items if available
-                const slotLabel = r.meal_type === 'breakfast' ? '🥣 Frühstück' : '🍽️ Mittagessen';
-
-                return html`
-                  <div class="mp-recipe-card">
-                    <div class="mp-recipe-header" onclick=${() => {
-                      setOpenRecipe(isOpen ? null : r.name);
-                      setOpenSection('servings');
-                    }}>
-                      <div class="mp-recipe-info">
-                        <div class="mp-recipe-name">
-                          ${r.name}
-                          ${isMealPrep
-                            ? html`<span class="mp-badge prep">Meal Prep</span>`
-                            : html`<span class="mp-badge fresh">Frisch</span>`
-                          }
-                        </div>
-                        <div class="mp-recipe-meta">
-                          ${slotLabel} · ${daysStr || '—'}
-                        </div>
-                        ${r.description ? html`
-                          <div class="mp-recipe-desc-preview">${r.description}</div>
-                        ` : ''}
-                      </div>
-                      <div class="meal-chevron">${isOpen ? Icons.chevUp : Icons.chevDown}</div>
-                    </div>
-                    ${isOpen && html`
-                      <div class="mp-recipe-body">
-                        <!-- Tab bar for sections -->
-                        ${hasDetail ? html`
-                          <div class="mp-tab-bar">
-                            <div class="mp-tab ${openSection === 'servings' ? 'active' : ''}"
-                              onclick=${() => setOpenSection('servings')}>Portionen</div>
-                            <div class="mp-tab ${openSection === 'ingredients' ? 'active' : ''}"
-                              onclick=${() => setOpenSection('ingredients')}>Zutaten</div>
-                            <div class="mp-tab ${openSection === 'steps' ? 'active' : ''}"
-                              onclick=${() => setOpenSection('steps')}>Zubereitung</div>
-                          </div>
-                        ` : ''}
-
-                        ${openSection === 'servings' && html`
-                          <div class="mp-servings-section">
-                            ${(r.servings || []).map(s => {
-                              const total = s.days.length * s.portion_factor;
-                              const portionLabel = s.portion_factor === 1 ? 'volle' : s.portion_factor === 0.5 ? 'halbe' : `${s.portion_factor}×`;
-                              return html`
-                                <div class="mp-serving-row">
-                                  <div class="mp-serving-person" style="color:${personColors[s.person] || '#333'}">
-                                    ${personLabels[s.person] || s.person}
-                                  </div>
-                                  <div class="mp-serving-detail">
-                                    <span class="mp-serving-days">${s.days.join(', ')}</span>
-                                    <span class="mp-serving-count">${s.days.length}× ${portionLabel} Portion = ${total} Portionen</span>
-                                  </div>
-                                </div>
-                              `;
-                            })}
-                            <div class="mp-serving-total">
-                              Gesamt: ${(r.servings || []).reduce((sum, s) => sum + s.days.length * s.portion_factor, 0)} Portionen
-                            </div>
-                          </div>
-                        `}
-
-                        ${openSection === 'ingredients' && html`
-                          ${r.total_items?.length > 0 ? html`
-                            <div class="mp-ingredients-title">Gesamtzutaten (alle Portionen)</div>
-                            ${r.total_items.map(it => html`
-                              <div class="mp-ingredient-row">
-                                <span class="mp-ingredient-name">${it.ingredient_name}</span>
-                                <span class="mp-ingredient-amount">${it.amount}${it.unit || 'g'}</span>
-                              </div>
-                            `)}
-                          ` : html`
-                            <div class="mp-empty-hint" style="padding:16px 0">Keine Zutatenliste vorhanden.</div>
-                          `}
-                        `}
-
-                        ${openSection === 'steps' && html`
-                          ${r.steps?.length > 0 ? html`
-                            <div class="mp-steps-section">
-                              ${r.steps.map((step, i) => html`
-                                <div class="mp-step-row">
-                                  <span class="mp-step-num">${i + 1}</span>
-                                  <span class="mp-step-text">${step}</span>
-                                </div>
-                              `)}
-                            </div>
-                          ` : html`
-                            <div class="mp-empty-hint" style="padding:16px 0">Keine Zubereitungsschritte vorhanden.</div>
-                          `}
-                        `}
-                      </div>
-                    `}
-                  </div>
-                `;
-              })}
-            </div>
-          `}
-        `}
-      </div>
-    </div>
-  `;
-}
-
-// ── Family Screen ──
-
-function FamilyScreen({ user }) {
-  const [selectedDate, setSelectedDate] = useState(today());
-  const [weekStart, setWeekStart] = useState(getWeekStart(today()));
-  const [weekDates, setWeekDates] = useState(getWeekDates(getWeekStart(today())));
-  const [daysData, setDaysData] = useState([]);
-  const [meals, setMeals] = useState([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => { loadFamilyWeek(weekStart); }, [weekStart, user]);
-  useEffect(() => { if (daysData.length > 0) loadFamilyDay(selectedDate); }, [selectedDate, daysData]);
-
-  async function loadFamilyWeek(start) {
-    setLoading(true);
-    try {
-      const week = await getOrCreateWeek(user.id, start);
-      const days = await getDaysForWeek(week.id);
-      const dates = getWeekDates(start);
-      const allDays = [];
-      for (const d of dates) {
-        let existing = days.find(dy => String(dy.date).slice(0, 10) === d);
-        if (!existing) existing = await getOrCreateDay(week.id, d, defaultDayType(d));
-        allDays.push(existing);
-      }
-      setDaysData(allDays);
-    } catch (e) { console.error('FamilyScreen error:', e); }
-    setLoading(false);
-  }
-
-  async function loadFamilyDay(dateStr) {
-    const day = daysData.find(d => String(d.date).slice(0, 10) === dateStr);
-    if (!day) return;
-    try {
-      const m = await getMealsForDay(day.id);
-      setMeals(m);
-    } catch (e) { setMeals([]); }
-  }
-
-  function selectDate(dateStr) {
-    setSelectedDate(dateStr);
-    const newStart = getWeekStart(dateStr);
-    if (newStart !== weekStart) {
-      setWeekStart(newStart);
-      setWeekDates(getWeekDates(newStart));
-    }
-  }
-
-  function shiftWeek(dir) {
-    const s = addDays(weekStart, dir * 7);
-    setWeekStart(s);
-    setWeekDates(getWeekDates(s));
-    setSelectedDate(dir > 0 ? s : addDays(s, 6));
-  }
-
-  const dayData = daysData.find(d => String(d.date).slice(0, 10) === selectedDate);
-  const dayType = dayData?.day_type || 'rest';
-  const allSlots = getSlotsForType(dayType);
-
-  // Family members
-  const members = [
-    { key: 'katja', initial: 'K', name: 'Katja', bg: '#E6F1FB', color: '#0C447C' },
-    { key: 'leander', initial: 'L', name: 'Leander', bg: '#E1F5EE', color: '#085041' },
-    { key: 'matthias', initial: 'M', name: 'Matthias', bg: '#f0f0ee', color: '#666' },
-  ];
-
-  return html`
-    <div class="screen">
-      <div class="family-screen">
-        <!-- Header with date picker -->
-        <div class="family-header">
-          <div class="week-header-top">
-            <h1 class="header-title">Familie</h1>
-            <div class="header-actions">
-              <div class="header-nav-arrows">
-                <div class="nav-arrow" onclick=${() => shiftWeek(-1)}>${Icons.chevLeft}</div>
-                <span class="kw-label">KW ${getKW(selectedDate)}</span>
-                <div class="nav-arrow" onclick=${() => shiftWeek(1)}>${Icons.chevRight}</div>
-              </div>
-            </div>
-          </div>
-          <div class="family-strip">
-            ${weekDates.map(d => {
-              const active = isToday(d);
-              const selected = d === selectedDate;
-              const dayNum = new Date(d + 'T12:00').getDate();
-              return html`
-                <div class="family-day ${selected ? 'selected' : ''}" onclick=${() => selectDate(d)}>
-                  <span class="family-day-label ${active ? 'today-label' : ''}">${active ? 'HEUTE' : weekdayShort(d)}</span>
-                  <div class="family-day-circle ${active ? 'active' : ''}">${dayNum}</div>
-                </div>
-              `;
-            })}
-          </div>
-        </div>
-
-        <!-- Day type pill -->
-        <div class="family-daytype">
-          <span class="family-daytype-pill" style="background:${DAYTYPE_COLORS[dayType]}20;color:${DAYTYPE_COLORS[dayType]}">
-            ${DAYTYPE_LABELS[dayType]}
-          </span>
-        </div>
-
-        ${loading ? html`<div class="loading-state">Laden...</div>` : html`
-          <!-- Meal slots with family rows -->
-          <div class="family-meals">
-            ${allSlots.map(slot => {
-              const katjaMeal = meals.find(m => m.slot === slot.key && (!m.person || m.person === 'katja'));
-
-              return html`
-                <div class="family-meal-card">
-                  <div class="family-meal-header">
-                    <span class="family-meal-icon">${slot.icon}</span>
-                    <span class="family-meal-label">${slot.label}</span>
-                  </div>
-                  <div class="family-member-rows">
-                    ${members.map(mem => {
-                      const meal = mem.key === 'katja' ? katjaMeal : null; // TODO: multi-person meals
-                      const name = meal ? meal.recipe_name : '—';
-                      const dimmed = !meal;
-                      return html`
-                        <div class="family-member-row ${dimmed ? 'dimmed' : ''}">
-                          <div class="family-avatar" style="background:${mem.bg};color:${mem.color}">${mem.initial}</div>
-                          <span class="family-member-meal">${name}</span>
-                        </div>
-                      `;
-                    })}
-                  </div>
-                </div>
-              `;
-            })}
-          </div>
-        `}
-      </div>
-    </div>
-  `;
-}
-
-// ── Settings Screen ──
-
-function SettingsScreen({ user, onLogout }) {
-  const [showImport, setShowImport] = useState(false);
-  const [importJson, setImportJson] = useState('');
-  const [importStatus, setImportStatus] = useState(''); // '', 'loading', 'success', 'error'
-  const [importMsg, setImportMsg] = useState('');
-
-  const clearCacheAndReload = async () => {
-    if ('serviceWorker' in navigator) {
-      const regs = await navigator.serviceWorker.getRegistrations();
-      for (const r of regs) await r.unregister();
-    }
-    if ('caches' in window) {
-      const keys = await caches.keys();
-      for (const k of keys) await caches.delete(k);
-    }
-    window.location.reload(true);
-  };
-
-  const handleImport = async () => {
-    if (!importJson.trim()) return;
-    setImportStatus('loading');
-    setImportMsg('');
-    try {
-      const data = JSON.parse(importJson.trim());
-      if (!data.start_date || !data.days) throw new Error('Ungültiges Format: start_date und days fehlen');
-      await importWeekData(user.id, data);
-      setImportStatus('success');
-      setImportMsg(`KW importiert (Start: ${data.start_date}). ${data.days.length} Tage mit ${data.days.reduce((s,d) => s + (d.meals?.length||0), 0)} Mahlzeiten.`);
-      setImportJson('');
-    } catch (e) {
-      setImportStatus('error');
-      setImportMsg(e.message);
-    }
-  };
-
-  return html`
-    <div class="screen">
-      <div class="settings-screen">
-        <h1 class="settings-title">Einstellungen</h1>
-
-        <div class="settings-section">
-          <div class="settings-label">Account</div>
-          <div class="settings-card">
-            <div class="settings-row">
-              <span>Email</span>
-              <span class="settings-value">${user?.email}</span>
-            </div>
-          </div>
-        </div>
-
-        <div class="settings-section">
-          <div class="settings-label">Daten</div>
-          <div class="settings-card">
-            <div class="settings-row clickable" onclick=${() => setShowImport(!showImport)}>
-              <span>Mealplan importieren</span>
-              <span class="settings-arrow">${showImport ? '↑' : '→'}</span>
-            </div>
-            ${showImport && html`
-              <div class="import-section">
-                <textarea
-                  class="import-textarea"
-                  placeholder='JSON vom Mealplan-Chat hier einfügen...'
-                  value=${importJson}
-                  onInput=${e => setImportJson(e.target.value)}
-                  rows="8"
-                />
-                <div class="import-actions">
-                  <div class="sheet-btn save" onclick=${handleImport}>
-                    ${importStatus === 'loading' ? 'Importiere...' : 'Importieren'}
-                  </div>
-                </div>
-                ${importMsg && html`
-                  <div class="import-msg ${importStatus}">${importMsg}</div>
-                `}
-              </div>
-            `}
-          </div>
-        </div>
-
-        <div class="settings-section">
-          <div class="settings-label">App</div>
-          <div class="settings-card">
-            <div class="settings-row clickable" onclick=${clearCacheAndReload}>
-              <span>App aktualisieren</span>
-              <span class="settings-arrow">→</span>
-            </div>
-          </div>
-        </div>
-
-        <div class="settings-section">
-          <div class="settings-card">
-            <div class="settings-row clickable danger" onclick=${onLogout}>
-              <span>Abmelden</span>
-            </div>
-          </div>
-        </div>
-
-        <div class="settings-version">Nutrition Tracker v0.1</div>
-      </div>
-    </div>
-  `;
-}
-
-// ── Main App ──
-
-function App() {
-  const [user, setUser] = useState(null);
-  const [authChecked, setAuthChecked] = useState(false);
-  const [tab, setTab] = useState('today');
-  const [targets, setTargets] = useState(null);
-  const [showSettings, setShowSettings] = useState(false);
-
-  useEffect(() => {
-    // Check existing session
-    getUser().then(u => {
-      setUser(u);
-      setAuthChecked(true);
-    });
-    // Listen for auth changes
-    const { data: { subscription } } = onAuthChange(u => setUser(u));
-    return () => subscription?.unsubscribe();
-  }, []);
-
-  // Load targets once authenticated
-  useEffect(() => {
-    if (user) {
-      getDayTypeTargets().then(t => setTargets(t)).catch(console.error);
-    }
-  }, [user]);
-
-  async function handleLogin(email, pw) {
-    await signIn(email, pw);
-  }
-
-  async function handleLogout() {
-    await signOut();
-    setUser(null);
-    setShowSettings(false);
-  }
-
-  if (!authChecked) {
-    return html`<div class="splash"><img class="splash-logo" src="icons/apple-touch-icon.png" alt=""/></div>`;
-  }
-
-  if (!user) {
-    return html`<${LoginScreen} onLogin=${handleLogin}/>`;
-  }
-
-  if (showSettings) {
-    return html`
-      <div class="app-container">
-        <${SettingsScreen} user=${user} onLogout=${handleLogout}/>
-        <${BottomNav} active="settings" onNav=${key => {
-          setShowSettings(false);
-          setTab(key);
-        }}/>
-      </div>
-    `;
-  }
-
-  const screens = {
-    today: html`<${TodayScreen} user=${user} targets=${targets} onSettings=${() => setShowSettings(true)}/>`,
-    week: html`<${WeekScreen} user=${user} targets=${targets}/>`,
-    mealplan: html`<${MealplanScreen} user=${user}/>`,
-    family: html`<${FamilyScreen} user=${user}/>`,
-  };
-
-  return html`
-    <div class="app-container">
-      ${screens[tab] || screens.today}
-      <${BottomNav} active=${tab} onNav=${key => {
-        if (key === 'settings') {
-          setShowSettings(true);
-        } else {
-          setTab(key);
-          setShowSettings(false);
-        }
-      }}/>
-    </div>
-  `;
-}
-
-// ── Mount ──
-render(html`<${App}/>`, document.getElementById('app'));
