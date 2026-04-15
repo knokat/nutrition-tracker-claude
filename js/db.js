@@ -117,6 +117,14 @@ export async function updateDayTotals(dayId, totals) {
   if (error) throw error;
 }
 
+export async function updateDayNotes(dayId, notes) {
+  const { error } = await supabase
+    .from('days')
+    .update({ notes })
+    .eq('id', dayId);
+  if (error) throw error;
+}
+
 // ── Meals ──
 
 export async function getMealsForDay(dayId) {
