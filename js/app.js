@@ -9,7 +9,7 @@ import {
 import {
   supabase, signIn, signOut, getUser, onAuthChange,
   getOrCreateWeek, getDaysForWeek, getOrCreateDay,
-  getMealsForDay, updateDayType, updateDayTotals,
+  getMealsForDay, updateDayType, updateDayTotals, updateDayNotes,
   upsertMeal, deleteMeal, getDayTypeTargets, importWeekData,
   findSiblingMeals, updateMealMacros, replaceMealItems, recalcDayTotals,
   getRecipesForWeek,
@@ -37,6 +37,8 @@ function TodayScreen({ user, targets, onSettings }) {
   const [meals, setMeals] = useState([]);
   const [loading, setLoading] = useState(true);
   const [editMeal, setEditMeal] = useState(null); // { meal, slot }
+  const [notes, setNotes] = useState('');
+  const notesTimer = useRef(null);
 
   // Load week data
   useEffect(() => {
@@ -82,6 +84,7 @@ function TodayScreen({ user, targets, onSettings }) {
     const day = daysData.find(d => String(d.date).slice(0, 10) === dateStr);
     if (!day) return;
     setDayData(day);
+    setNotes(day.notes || '');
     try {
       const m = await getMealsForDay(day.id);
       console.log('loadDay:', dateStr, 'meals=', m.length, m.map(x => x.recipe_name));
@@ -119,6 +122,21 @@ function TodayScreen({ user, targets, onSettings }) {
     } catch (e) {
       console.error('changeDayType error:', e);
     }
+  }
+
+  function handleNotesChange(value) {
+    setNotes(value);
+    if (notesTimer.current) clearTimeout(notesTimer.current);
+    notesTimer.current = setTimeout(async () => {
+      if (!dayData) return;
+      try {
+        await updateDayNotes(dayData.id, value);
+        setDayData(prev => ({ ...prev, notes: value }));
+        setDaysData(prev => prev.map(d => d.id === dayData.id ? { ...d, notes: value } : d));
+      } catch (e) {
+        console.error('saveNotes error:', e);
+      }
+    }, 800);
   }
 
   async function handleDeleteMeal(mealToDelete) {
@@ -283,6 +301,17 @@ function TodayScreen({ user, targets, onSettings }) {
           options=${DAYTYPE_OPTIONS}
           onChange=${changeDayType}
         />
+
+        <!-- Notes -->
+        <div class="day-notes">
+          <textarea
+            class="day-notes-input"
+            placeholder="Notizen zum Tag..."
+            value=${notes}
+            onInput=${e => handleNotesChange(e.target.value)}
+            rows="3"
+          />
+        </div>
 
         <div class="meals-list">
           ${loading
@@ -498,9 +527,7 @@ function WeekScreen({ user, targets }) {
 function MealplanScreen({ user }) {
   const [weekStart, setWeekStart] = useState(getWeekStart(today()));
   const [weekDates, setWeekDates] = useState(getWeekDates(getWeekStart(today())));
-  const [daysData, setDaysData] = useState([]);
-  const [allMeals, setAllMeals] = useState({}); // { date: [meals] }
-  const [recipeDetails, setRecipeDetails] = useState([]); // from recipes table
+  const [recipeDetails, setRecipeDetails] = useState([]); // from recipes table (static snapshot)
   const [loading, setLoading] = useState(true);
   const [openRecipe, setOpenRecipe] = useState(null); // recipe_name
   const [openSection, setOpenSection] = useState('servings'); // 'servings' | 'ingredients' | 'steps'
@@ -511,23 +538,7 @@ function MealplanScreen({ user }) {
     setLoading(true);
     try {
       const week = await getOrCreateWeek(user.id, start);
-      const days = await getDaysForWeek(week.id);
-      const dates = getWeekDates(start);
-      const allDays = [];
-      const mealsMap = {};
-      for (const d of dates) {
-        let existing = days.find(dy => String(dy.date).slice(0, 10) === d);
-        if (!existing) {
-          existing = await getOrCreateDay(week.id, d, defaultDayType(d));
-        }
-        allDays.push(existing);
-        const m = await getMealsForDay(existing.id);
-        mealsMap[d] = m;
-      }
-      setDaysData(allDays);
-      setAllMeals(mealsMap);
-
-      // Load recipe details
+      // Only load recipe snapshots — NOT live meals
       const recs = await getRecipesForWeek(week.id);
       setRecipeDetails(recs);
     } catch (e) { console.error('MealplanScreen error:', e); }
@@ -540,46 +551,27 @@ function MealplanScreen({ user }) {
     setWeekDates(getWeekDates(s));
   }
 
-  // Group meals by unique recipe (variable only)
-  const recipes = [];
-  const seen = new Set();
-  const weekdayMeals = {}; // { recipeName: [dates] }
+  // Build data purely from recipes (static snapshot from import)
+  const variableRecipes = recipeDetails.filter(r => !r.is_meal_prep || r.is_meal_prep);
+  // actually: all recipes are "variable" in the recipes table — standard meals are not stored there
 
-  Object.entries(allMeals).forEach(([date, meals]) => {
-    meals.forEach(m => {
-      if (!m.recipe_name) return;
-      if (!weekdayMeals[m.recipe_name]) weekdayMeals[m.recipe_name] = [];
-      weekdayMeals[m.recipe_name].push({ date, ...m });
-      if (!seen.has(m.recipe_name)) {
-        seen.add(m.recipe_name);
-        recipes.push(m);
-      }
-    });
-  });
-
-  // Separate variable and standard
-  const variableRecipes = recipes.filter(r => !r.is_standard);
-  const standardRecipes = recipes.filter(r => r.is_standard);
-
-  // Build overview: what's for Mo-Do, Fr, Sa+So
+  // Build overview from recipe servings data
   const mealsByPeriod = { moDo: {}, fr: {}, saSo: {} };
-  weekDates.forEach((d, i) => {
-    const meals = allMeals[d] || [];
-    const dayMeals = meals.filter(m => ['breakfast', 'lunch'].includes(m.slot) && !m.is_standard);
-    // Sa=0, So=1, Mo=2, Di=3, Mi=4, Do=5, Fr=6
-    if (i >= 2 && i <= 5) { // Mo-Do
-      dayMeals.forEach(m => { mealsByPeriod.moDo[m.slot] = m.recipe_name; });
-    } else if (i === 6) { // Fr
-      dayMeals.forEach(m => { mealsByPeriod.fr[m.slot] = m.recipe_name; });
-    } else { // Sa, So
-      dayMeals.forEach(m => { mealsByPeriod.saSo[m.slot] = m.recipe_name; });
+  recipeDetails.forEach(r => {
+    const slot = r.meal_type || 'lunch';
+    const slotIcon = slot === 'breakfast' ? '🥣' : '🍽️';
+    // Check which periods this recipe covers from servings
+    const katjaServings = (r.servings || []).find(s => s.person === 'katja');
+    if (katjaServings) {
+      const days = katjaServings.days || [];
+      const hasMoDo = days.some(d => ['Mo', 'Di', 'Mi', 'Do'].includes(d));
+      const hasFr = days.some(d => d === 'Fr');
+      const hasSaSo = days.some(d => ['Sa', 'So'].includes(d));
+      if (hasMoDo) mealsByPeriod.moDo[slot] = r.name;
+      if (hasFr) mealsByPeriod.fr[slot] = r.name;
+      if (hasSaSo) mealsByPeriod.saSo[slot] = r.name;
     }
   });
-
-  // Helper: find recipe detail by name
-  function getDetail(recipeName) {
-    return recipeDetails.find(r => r.name === recipeName);
-  }
 
   // Person labels
   const personLabels = { katja: 'Katja', leander: 'Leander', matthias: 'Matthias' };
@@ -604,174 +596,155 @@ function MealplanScreen({ user }) {
         </div>
 
         ${loading ? html`<div class="loading-state">Laden...</div>` : html`
-          <!-- Overview Card -->
-          <div class="mp-overview-card">
-            <div class="mp-overview-title">Wochenübersicht</div>
-            ${mealsByPeriod.moDo.breakfast || mealsByPeriod.moDo.lunch ? html`
-              <div class="mp-period">
-                <span class="mp-period-label">Mo–Do</span>
-                <div class="mp-period-meals">
-                  ${mealsByPeriod.moDo.breakfast ? html`<div class="mp-period-meal">🥣 ${mealsByPeriod.moDo.breakfast}</div>` : ''}
-                  ${mealsByPeriod.moDo.lunch ? html`<div class="mp-period-meal">🍽️ ${mealsByPeriod.moDo.lunch}</div>` : ''}
-                </div>
-              </div>
-            ` : ''}
-            ${mealsByPeriod.fr.breakfast ? html`
-              <div class="mp-period">
-                <span class="mp-period-label">Freitag</span>
-                <div class="mp-period-meals">
-                  <div class="mp-period-meal">🥣 ${mealsByPeriod.fr.breakfast}</div>
-                  <div class="mp-period-meal">🍅 Caprese</div>
-                  <div class="mp-period-meal">🎬 Movie Night</div>
-                </div>
-              </div>
-            ` : ''}
-            ${mealsByPeriod.saSo.breakfast || mealsByPeriod.saSo.lunch ? html`
-              <div class="mp-period">
-                <span class="mp-period-label">Sa + So</span>
-                <div class="mp-period-meals">
-                  ${mealsByPeriod.saSo.breakfast ? html`<div class="mp-period-meal">🥣 ${mealsByPeriod.saSo.breakfast}</div>` : ''}
-                  ${mealsByPeriod.saSo.lunch ? html`<div class="mp-period-meal">🍽️ ${mealsByPeriod.saSo.lunch}</div>` : ''}
-                </div>
-              </div>
-            ` : ''}
-          </div>
-
-          <!-- Recipe Cards -->
-          <div class="mp-section-title">Rezepte (${variableRecipes.length})</div>
-          <div class="mp-recipes">
-            ${variableRecipes.map(r => {
-              const isOpen = openRecipe === r.recipe_name;
-              const items = r.meal_items || [];
-              const occurrences = weekdayMeals[r.recipe_name] || [];
-              const days = occurrences.map(o => weekdayShort(String(o.date).slice(0, 10))).join(', ');
-              const isMealPrep = occurrences.length >= 3;
-              const detail = getDetail(r.recipe_name);
-              const hasDetail = detail && (detail.servings?.length > 0 || detail.total_items?.length > 0 || detail.steps?.length > 0);
-
-              return html`
-                <div class="mp-recipe-card">
-                  <div class="mp-recipe-header" onclick=${() => {
-                    setOpenRecipe(isOpen ? null : r.recipe_name);
-                    setOpenSection('servings');
-                  }}>
-                    <div class="mp-recipe-info">
-                      <div class="mp-recipe-name">
-                        ${r.recipe_name}
-                        ${isMealPrep
-                          ? html`<span class="mp-badge prep">Meal Prep</span>`
-                          : html`<span class="mp-badge fresh">Frisch</span>`
-                        }
-                      </div>
-                      <div class="mp-recipe-meta">
-                        ${r.slot === 'breakfast' ? '🥣 Frühstück' : '🍽️ Mittagessen'} · ${days}
-                      </div>
-                      <div class="mp-recipe-macros">
-                        ${n0(r.kcal)} kcal · P ${n0(r.protein)} · C ${n0(r.carbs)} · F ${n0(r.fat)}
-                      </div>
-                    </div>
-                    <div class="meal-chevron">${isOpen ? Icons.chevUp : Icons.chevDown}</div>
+          ${recipeDetails.length === 0 ? html`
+            <div class="mp-empty-state">
+              <div class="mp-empty-icon">📋</div>
+              <div class="mp-empty-text">Kein Mealplan für diese Woche importiert.</div>
+              <div class="mp-empty-hint">Importiere einen Mealplan unter Einstellungen.</div>
+            </div>
+          ` : html`
+            <!-- Overview Card -->
+            <div class="mp-overview-card">
+              <div class="mp-overview-title">Wochenübersicht</div>
+              ${mealsByPeriod.moDo.breakfast || mealsByPeriod.moDo.lunch ? html`
+                <div class="mp-period">
+                  <span class="mp-period-label">Mo–Do</span>
+                  <div class="mp-period-meals">
+                    ${mealsByPeriod.moDo.breakfast ? html`<div class="mp-period-meal">🥣 ${mealsByPeriod.moDo.breakfast}</div>` : ''}
+                    ${mealsByPeriod.moDo.lunch ? html`<div class="mp-period-meal">🍽️ ${mealsByPeriod.moDo.lunch}</div>` : ''}
                   </div>
-                  ${isOpen && html`
-                    <div class="mp-recipe-body">
-                      ${detail?.description ? html`
-                        <div class="mp-recipe-desc">${detail.description}</div>
-                      ` : ''}
+                </div>
+              ` : ''}
+              ${mealsByPeriod.fr.breakfast || mealsByPeriod.fr.lunch ? html`
+                <div class="mp-period">
+                  <span class="mp-period-label">Freitag</span>
+                  <div class="mp-period-meals">
+                    ${mealsByPeriod.fr.breakfast ? html`<div class="mp-period-meal">🥣 ${mealsByPeriod.fr.breakfast}</div>` : ''}
+                    <div class="mp-period-meal">🍅 Caprese</div>
+                    <div class="mp-period-meal">🎬 Movie Night</div>
+                  </div>
+                </div>
+              ` : ''}
+              ${mealsByPeriod.saSo.breakfast || mealsByPeriod.saSo.lunch ? html`
+                <div class="mp-period">
+                  <span class="mp-period-label">Sa + So</span>
+                  <div class="mp-period-meals">
+                    ${mealsByPeriod.saSo.breakfast ? html`<div class="mp-period-meal">🥣 ${mealsByPeriod.saSo.breakfast}</div>` : ''}
+                    ${mealsByPeriod.saSo.lunch ? html`<div class="mp-period-meal">🍽️ ${mealsByPeriod.saSo.lunch}</div>` : ''}
+                  </div>
+                </div>
+              ` : ''}
+            </div>
 
-                      <!-- Tab bar for sections -->
-                      ${hasDetail ? html`
-                        <div class="mp-tab-bar">
-                          <div class="mp-tab ${openSection === 'servings' ? 'active' : ''}"
-                            onclick=${() => setOpenSection('servings')}>Portionen</div>
-                          <div class="mp-tab ${openSection === 'ingredients' ? 'active' : ''}"
-                            onclick=${() => setOpenSection('ingredients')}>Zutaten</div>
-                          <div class="mp-tab ${openSection === 'steps' ? 'active' : ''}"
-                            onclick=${() => setOpenSection('steps')}>Zubereitung</div>
+            <!-- Recipe Cards -->
+            <div class="mp-section-title">Rezepte (${recipeDetails.length})</div>
+            <div class="mp-recipes">
+              ${recipeDetails.map(r => {
+                const isOpen = openRecipe === r.name;
+                const hasDetail = (r.servings?.length > 0 || r.total_items?.length > 0 || r.steps?.length > 0);
+                const isMealPrep = r.is_meal_prep;
+
+                // Build days string from servings
+                const allDays = (r.servings || []).flatMap(s => s.days || []);
+                const uniqueDays = [...new Set(allDays)];
+                const daysStr = uniqueDays.join(', ');
+
+                // Calculate per-portion macros from total_items if available
+                const slotLabel = r.meal_type === 'breakfast' ? '🥣 Frühstück' : '🍽️ Mittagessen';
+
+                return html`
+                  <div class="mp-recipe-card">
+                    <div class="mp-recipe-header" onclick=${() => {
+                      setOpenRecipe(isOpen ? null : r.name);
+                      setOpenSection('servings');
+                    }}>
+                      <div class="mp-recipe-info">
+                        <div class="mp-recipe-name">
+                          ${r.name}
+                          ${isMealPrep
+                            ? html`<span class="mp-badge prep">Meal Prep</span>`
+                            : html`<span class="mp-badge fresh">Frisch</span>`
+                          }
                         </div>
-                      ` : ''}
-
-                      ${(!hasDetail || openSection === 'ingredients') && html`
-                        ${hasDetail && detail.total_items?.length > 0 ? html`
-                          <!-- Total ingredients for all portions -->
-                          <div class="mp-ingredients-title">Gesamtzutaten (alle Portionen)</div>
-                          ${detail.total_items.map(it => html`
-                            <div class="mp-ingredient-row">
-                              <span class="mp-ingredient-name">${it.ingredient_name}</span>
-                              <span class="mp-ingredient-amount">${it.amount}${it.unit || 'g'}</span>
-                            </div>
-                          `)}
-                          <div class="mp-divider"></div>
-                          <div class="mp-ingredients-title">Pro Portion (Katja)</div>
-                          ${items.map(it => html`
-                            <div class="mp-ingredient-row">
-                              <span class="mp-ingredient-name">${it.ingredient_name}</span>
-                              <span class="mp-ingredient-amount">${n0(it.amount_g)}${it.unit || 'g'}</span>
-                              <span class="mp-ingredient-kcal">${n0(it.kcal)} kcal</span>
-                            </div>
-                          `)}
-                        ` : html`
-                          <!-- Fallback: only per-portion items -->
-                          <div class="mp-ingredients-title">Zutaten pro Portion</div>
-                          ${items.map(it => html`
-                            <div class="mp-ingredient-row">
-                              <span class="mp-ingredient-name">${it.ingredient_name}</span>
-                              <span class="mp-ingredient-amount">${n0(it.amount_g)}${it.unit || 'g'}</span>
-                              <span class="mp-ingredient-kcal">${n0(it.kcal)} kcal</span>
-                            </div>
-                          `)}
-                        `}
-                      `}
-
-                      ${openSection === 'servings' && hasDetail && html`
-                        <div class="mp-servings-section">
-                          ${(detail.servings || []).map(s => {
-                            const total = s.days.length * s.portion_factor;
-                            const portionLabel = s.portion_factor === 1 ? 'volle' : s.portion_factor === 0.5 ? 'halbe' : `${s.portion_factor}×`;
-                            return html`
-                              <div class="mp-serving-row">
-                                <div class="mp-serving-person" style="color:${personColors[s.person] || '#333'}">
-                                  ${personLabels[s.person] || s.person}
-                                </div>
-                                <div class="mp-serving-detail">
-                                  <span class="mp-serving-days">${s.days.join(', ')}</span>
-                                  <span class="mp-serving-count">${s.days.length}× ${portionLabel} Portion = ${total} Portionen</span>
-                                </div>
-                              </div>
-                            `;
-                          })}
-                          <div class="mp-serving-total">
-                            Gesamt: ${(detail.servings || []).reduce((sum, s) => sum + s.days.length * s.portion_factor, 0)} Portionen
-                          </div>
+                        <div class="mp-recipe-meta">
+                          ${slotLabel} · ${daysStr || '—'}
                         </div>
-                      `}
-
-                      ${openSection === 'steps' && hasDetail && html`
-                        <div class="mp-steps-section">
-                          ${(detail.steps || []).map((step, i) => html`
-                            <div class="mp-step-row">
-                              <span class="mp-step-num">${i + 1}</span>
-                              <span class="mp-step-text">${step}</span>
-                            </div>
-                          `)}
-                        </div>
-                      `}
+                        ${r.description ? html`
+                          <div class="mp-recipe-desc-preview">${r.description}</div>
+                        ` : ''}
+                      </div>
+                      <div class="meal-chevron">${isOpen ? Icons.chevUp : Icons.chevDown}</div>
                     </div>
-                  `}
-                </div>
-              `;
-            })}
-          </div>
+                    ${isOpen && html`
+                      <div class="mp-recipe-body">
+                        <!-- Tab bar for sections -->
+                        ${hasDetail ? html`
+                          <div class="mp-tab-bar">
+                            <div class="mp-tab ${openSection === 'servings' ? 'active' : ''}"
+                              onclick=${() => setOpenSection('servings')}>Portionen</div>
+                            <div class="mp-tab ${openSection === 'ingredients' ? 'active' : ''}"
+                              onclick=${() => setOpenSection('ingredients')}>Zutaten</div>
+                            <div class="mp-tab ${openSection === 'steps' ? 'active' : ''}"
+                              onclick=${() => setOpenSection('steps')}>Zubereitung</div>
+                          </div>
+                        ` : ''}
 
-          <!-- Standard Meals -->
-          ${standardRecipes.length > 0 && html`
-            <div class="mp-section-title" style="margin-top:16px">Standardbausteine (${standardRecipes.length})</div>
-            <div class="mp-standards">
-              ${standardRecipes.map(r => html`
-                <div class="mp-standard-row">
-                  <span class="mp-standard-name">${r.recipe_name}</span>
-                  <span class="mp-standard-kcal">${n0(r.kcal)} kcal</span>
-                </div>
-              `)}
+                        ${openSection === 'servings' && html`
+                          <div class="mp-servings-section">
+                            ${(r.servings || []).map(s => {
+                              const total = s.days.length * s.portion_factor;
+                              const portionLabel = s.portion_factor === 1 ? 'volle' : s.portion_factor === 0.5 ? 'halbe' : `${s.portion_factor}×`;
+                              return html`
+                                <div class="mp-serving-row">
+                                  <div class="mp-serving-person" style="color:${personColors[s.person] || '#333'}">
+                                    ${personLabels[s.person] || s.person}
+                                  </div>
+                                  <div class="mp-serving-detail">
+                                    <span class="mp-serving-days">${s.days.join(', ')}</span>
+                                    <span class="mp-serving-count">${s.days.length}× ${portionLabel} Portion = ${total} Portionen</span>
+                                  </div>
+                                </div>
+                              `;
+                            })}
+                            <div class="mp-serving-total">
+                              Gesamt: ${(r.servings || []).reduce((sum, s) => sum + s.days.length * s.portion_factor, 0)} Portionen
+                            </div>
+                          </div>
+                        `}
+
+                        ${openSection === 'ingredients' && html`
+                          ${r.total_items?.length > 0 ? html`
+                            <div class="mp-ingredients-title">Gesamtzutaten (alle Portionen)</div>
+                            ${r.total_items.map(it => html`
+                              <div class="mp-ingredient-row">
+                                <span class="mp-ingredient-name">${it.ingredient_name}</span>
+                                <span class="mp-ingredient-amount">${it.amount}${it.unit || 'g'}</span>
+                              </div>
+                            `)}
+                          ` : html`
+                            <div class="mp-empty-hint" style="padding:16px 0">Keine Zutatenliste vorhanden.</div>
+                          `}
+                        `}
+
+                        ${openSection === 'steps' && html`
+                          ${r.steps?.length > 0 ? html`
+                            <div class="mp-steps-section">
+                              ${r.steps.map((step, i) => html`
+                                <div class="mp-step-row">
+                                  <span class="mp-step-num">${i + 1}</span>
+                                  <span class="mp-step-text">${step}</span>
+                                </div>
+                              `)}
+                            </div>
+                          ` : html`
+                            <div class="mp-empty-hint" style="padding:16px 0">Keine Zubereitungsschritte vorhanden.</div>
+                          `}
+                        `}
+                      </div>
+                    `}
+                  </div>
+                `;
+              })}
             </div>
           `}
         `}
