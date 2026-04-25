@@ -871,7 +871,8 @@ function FamilyScreen({ user }) {
                   </div>
                   <div class="family-member-rows">
                     ${members.map(mem => {
-                      const meal = mem.key === 'katja' ? katjaMeal : null; // TODO: multi-person meals
+                      const meal = mem.key === 'katja' ? katjaMeal
+                        : meals.find(m => m.slot === slot.key && m.person === mem.key) || null;
                       const name = meal ? meal.recipe_name : '—';
                       const dimmed = !meal;
                       return html`
