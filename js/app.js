@@ -147,7 +147,7 @@ function TodayScreen({ user, targets, onSettings }) {
       await deleteMeal(mealToDelete.id);
       const m = await getMealsForDay(dayData.id);
       setMeals(m);
-      const totals = sumMacros(m);
+      const totals = sumMacros(m.filter(x => !x.person || x.person === 'katja'));
       await updateDayTotals(dayData.id, {
         total_kcal: totals.kcal,
         total_protein: totals.protein,
@@ -210,7 +210,7 @@ function TodayScreen({ user, targets, onSettings }) {
       setMeals(m);
 
       // Recalc and update current day totals
-      const totals = sumMacros(m);
+      const totals = sumMacros(m.filter(x => !x.person || x.person === 'katja'));
       await updateDayTotals(dayData.id, {
         total_kcal: totals.kcal,
         total_protein: totals.protein,
@@ -318,7 +318,7 @@ function TodayScreen({ user, targets, onSettings }) {
           ${loading
             ? html`<div class="loading-state">Laden...</div>`
             : slots.map(slot => {
-                const meal = meals.find(m => m.slot === slot.key);
+                const meal = meals.find(m => m.slot === slot.key && (!m.person || m.person === 'katja'));
                 return html`<${MealCard}
                   key=${slot.key}
                   slot=${slot}
@@ -811,14 +811,36 @@ function FamilyScreen({ user }) {
 
   const dayData = daysData.find(d => String(d.date).slice(0, 10) === selectedDate);
   const dayType = dayData?.day_type || 'rest';
-  const allSlots = getSlotsForType(dayType);
 
-  // Family members
-  const members = [
-    { key: 'katja', initial: 'K', name: 'Katja', bg: '#E6F1FB', color: '#0C447C' },
-    { key: 'leander', initial: 'L', name: 'Leander', bg: '#E1F5EE', color: '#085041' },
-    { key: 'matthias', initial: 'M', name: 'Matthias', bg: '#f0f0ee', color: '#666' },
+  // Leander's fixed breakfast — always shown
+  const LEANDER_BREAKFAST = {
+    recipe_name: "Leander's Overnight Oats",
+    slot: 'breakfast',
+    person: 'leander',
+    items: [
+      { ingredient_name: 'Flohsamenschalen', amount_g: 1, unit: 'g' },
+      { ingredient_name: 'Haferflocken', amount_g: 25, unit: 'g' },
+      { ingredient_name: 'Leinsamen', amount_g: 3, unit: 'g' },
+      { ingredient_name: 'Hafermilch', amount_g: 31, unit: 'ml' },
+      { ingredient_name: 'Joghurt 10%', amount_g: 75, unit: 'g' },
+      { ingredient_name: 'Whey Protein', amount_g: 10, unit: 'g' },
+      { ingredient_name: 'Zimt', amount_g: null, unit: null },
+    ],
+  };
+
+  // Find Leander's lunch from DB
+  const leanderLunch = meals.find(m => m.slot === 'lunch' && m.person === 'leander') || null;
+
+  // Leander's meals for this day
+  const leanderSlots = [
+    { key: 'breakfast', icon: '🥣', label: 'Frühstück', meal: LEANDER_BREAKFAST, fixed: true },
+    { key: 'lunch', icon: '🍽️', label: 'Mittagessen', meal: leanderLunch, fixed: false },
   ];
+
+  const [expanded, setExpanded] = useState({});
+  function toggleExpand(key) {
+    setExpanded(prev => ({ ...prev, [key]: !prev[key] }));
+  }
 
   return html`
     <div class="screen">
@@ -826,7 +848,7 @@ function FamilyScreen({ user }) {
         <!-- Header with date picker -->
         <div class="family-header">
           <div class="week-header-top">
-            <h1 class="header-title">Familie</h1>
+            <h1 class="header-title">Leander</h1>
             <div class="header-actions">
               <div class="header-nav-arrows">
                 <div class="nav-arrow" onclick=${() => shiftWeek(-1)}>${Icons.chevLeft}</div>
@@ -850,39 +872,33 @@ function FamilyScreen({ user }) {
           </div>
         </div>
 
-        <!-- Day type pill -->
-        <div class="family-daytype">
-          <span class="family-daytype-pill" style="background:${DAYTYPE_COLORS[dayType]}20;color:${DAYTYPE_COLORS[dayType]}">
-            ${DAYTYPE_LABELS[dayType]}
-          </span>
-        </div>
-
         ${loading ? html`<div class="loading-state">Laden...</div>` : html`
-          <!-- Meal slots with family rows -->
           <div class="family-meals">
-            ${allSlots.map(slot => {
-              const katjaMeal = meals.find(m => m.slot === slot.key && (!m.person || m.person === 'katja'));
+            ${leanderSlots.map(slot => {
+              const meal = slot.meal;
+              const hasItems = meal && meal.items && meal.items.length > 0;
+              const isOpen = expanded[slot.key];
 
               return html`
-                <div class="family-meal-card">
+                <div class="family-meal-card" onclick=${() => hasItems && toggleExpand(slot.key)} style=${hasItems ? 'cursor:pointer' : ''}>
                   <div class="family-meal-header">
                     <span class="family-meal-icon">${slot.icon}</span>
-                    <span class="family-meal-label">${slot.label}</span>
+                    <div style="flex:1">
+                      <span class="family-meal-label">${slot.label}</span>
+                      <div class="family-meal-name">${meal ? meal.recipe_name : '—'}</div>
+                    </div>
+                    ${hasItems ? html`<span class="family-expand-arrow">${isOpen ? '▾' : '▸'}</span>` : null}
                   </div>
-                  <div class="family-member-rows">
-                    ${members.map(mem => {
-                      const meal = mem.key === 'katja' ? katjaMeal
-                        : meals.find(m => m.slot === slot.key && m.person === mem.key) || null;
-                      const name = meal ? meal.recipe_name : '—';
-                      const dimmed = !meal;
-                      return html`
-                        <div class="family-member-row ${dimmed ? 'dimmed' : ''}">
-                          <div class="family-avatar" style="background:${mem.bg};color:${mem.color}">${mem.initial}</div>
-                          <span class="family-member-meal">${name}</span>
+                  ${isOpen && hasItems ? html`
+                    <div class="family-items">
+                      ${meal.items.map(item => html`
+                        <div class="family-item-row">
+                          <span class="family-item-amount">${item.amount_g ? `${item.amount_g}${item.unit || 'g'}` : ''}</span>
+                          <span class="family-item-name">${item.ingredient_name}</span>
                         </div>
-                      `;
-                    })}
-                  </div>
+                      `)}
+                    </div>
+                  ` : null}
                 </div>
               `;
             })}
